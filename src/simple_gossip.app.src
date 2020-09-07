@@ -1,0 +1,15 @@
+{application, simple_gossip,
+ [{description, "Simple gossip"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {simple_gossip_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
