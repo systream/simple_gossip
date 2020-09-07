@@ -33,6 +33,7 @@ init([]) ->
     Server =
         #{id => simple_gossip_server,
           start => {simple_gossip_server, start_link, []},
+          restart => permanent,
           modules => [simple_gossip_server]},
 
     ChildSpecs = [Server],

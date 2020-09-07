@@ -4,7 +4,6 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 05. Sep 2020 20:41
 %%%-------------------------------------------------------------------
 -module(simple_gossip_server).
 -author("tihanyipeter").
@@ -35,19 +34,24 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+-spec set(term()) -> ok.
 set(Data) ->
   gen_server:call(?SERVER, {set, Data}).
 
+-spec get() -> term().
 get() ->
   gen_server:call(?SERVER, get).
 
+-spec join(node()) -> ok.
 join(Node) ->
   gen_server:call(?SERVER, {join, Node}).
 
+-spec leave(node()) -> ok.
 leave(Node) ->
   gen_server:call(?SERVER, {leave, Node}).
 
+-spec status() ->
+  {ok, Vsn :: pos_integer(), Claimant :: node(), Nodes :: [node()]} | {error, timeout} | mismatch.
 status() ->
   gen_server:call(?SERVER, status).
 
@@ -81,7 +85,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  State = #state{claimant = node()},
+  State = #state{claimant = node(), nodes = [node()]},
   schedule_gossip(State),
   {ok, State}.
 
@@ -110,7 +114,12 @@ handle_call({set, Data}, _From, #state{claimant = Claimant} = State) ->
   {reply, gen_server:call({?MODULE, Claimant}, {set, Data}), State};
 handle_call({join, Node}, _From, #state{nodes = Nodes} = State) ->
   net_kernel:connect_node(Node),
-  {reply, ok, increase_version(State#state{nodes = [Node | Nodes]})};
+  case lists:member(Node, Nodes) of
+    true ->
+      {reply, ok, State};
+    _ ->
+      {reply, ok, increase_version(State#state{nodes = [Node | Nodes]})}
+  end;
 handle_call({leave, Node}, _From, #state{nodes = Nodes} = State) ->
   {reply, ok, increase_version(State#state{nodes = lists:delete(Node, Nodes)})};
 handle_call(status, From, #state{nodes = Nodes, gossip_version = Version, claimant = Claimant} = State) ->
@@ -130,20 +139,6 @@ handle_call(status, From, #state{nodes = Nodes, gossip_version = Version, claima
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
-receive_gossip_version(_, [], Vsn) ->
-  Vsn;
-receive_gossip_version(Ref, [Node | Nodes], {ok, Vsn}) ->
-  receive
-    {gossip_vsn, Vsn, Ref, Node} ->
-      receive_gossip_version(Ref, Nodes, {ok, Vsn});
-    {gossip_vsn, _, Ref, Node} ->
-      receive_gossip_version(Ref, Nodes, mismatch)
-  after 1000 ->
-    {error, timeout}
-  end;
-receive_gossip_version(_, _, Result) ->
-  Result.
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -157,12 +152,11 @@ receive_gossip_version(_, _, Result) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({reconcile, #state{gossip_version = InVersion} = InState},
                         #state{gossip_version = Version}) when InVersion > Version ->
-  io:format("Reconcile accepted: ~p ~n", [InVersion]),
   gossip(InState),
   {noreply, InState};
 handle_cast({reconcile, _}, State) ->
-  %io:format("Reconcile dropped~n", []),
   {noreply, State};
+
 handle_cast({get_gossip_version, Requester, Ref}, State = #state{gossip_version = Vsn}) ->
   Requester ! {gossip_vsn, Vsn, Ref, node()},
   {noreply, State}.
@@ -184,10 +178,6 @@ handle_cast({get_gossip_version, Requester, Ref}, State = #state{gossip_version 
 handle_info(tick, State) ->
   gossip_random_node(State),
   schedule_gossip(State),
-  %io:format("tick~n", []),
-  {noreply, State};
-handle_info(_Info, State) ->
-  io:format("info: ~p~n", [_Info]),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -227,14 +217,7 @@ gossip(#state{nodes = []}) ->
   ok;
 gossip(#state{nodes = Nodes, max_gossip_per_period = Max} = State) ->
   NewNodes = lists:delete(node(), Nodes),
-  CountOfNodes =
-    case rand:uniform(length(NewNodes)) of
-      Count when Count < Max ->
-        Count;
-      _ ->
-        Max
-    end,
-  RandomNodes = pick_random_nodes(NewNodes, CountOfNodes),
+  RandomNodes = pick_random_nodes(NewNodes, Max),
   [gossip(State, Node) || Node <- RandomNodes].
 
 gossip_random_node(#state{nodes = []}) ->
@@ -246,7 +229,6 @@ gossip_random_node(#state{nodes = Nodes} = State) ->
   ok.
 
 gossip(State, Node) ->
-  io:format("sending reconcile to ~p version: ~p~n", [Node, State#state.gossip_version]),
   gen_server:cast({?MODULE, Node}, {reconcile, State}).
 
 pick_random_nodes(Nodes, Number) ->
@@ -264,6 +246,16 @@ schedule_gossip(#state{gossip_period = Period}) ->
 increase_version(#state{gossip_version = GossipVersion} = State) ->
   State#state{gossip_version = GossipVersion+1}.
 
-
-% [simple_gossip_server:join(list_to_atom(integer_to_list(I) ++ "@Tihanyi-MacBook-Pro-2")) || I <- lists:seq(1, 30)].
-% [simple_gossip_server:join(list_to_atom(integer_to_list(I) ++ "@Tihanyi-MacBook-Pro-2")) || I <- lists:seq(1, 3)].
+receive_gossip_version(_, [], Vsn) ->
+  Vsn;
+receive_gossip_version(Ref, [Node | Nodes], {ok, Vsn}) ->
+  receive
+    {gossip_vsn, Vsn, Ref, Node} ->
+      receive_gossip_version(Ref, Nodes, {ok, Vsn});
+    {gossip_vsn, _, Ref, Node} ->
+      receive_gossip_version(Ref, Nodes, mismatch)
+  after 1000 ->
+    {error, timeout}
+  end;
+receive_gossip_version(_, _, Result) ->
+  Result.
