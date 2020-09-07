@@ -1,12 +1,12 @@
 %%%-------------------------------------------------------------------
-%%% @author tihanyipeter
-%%% @copyright (C) 2020, <COMPANY>
+%%% @author Peter Tihanyi
+%%% @copyright (C) 2020, Systream
 %%% @doc
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip).
--author("tihanyipeter").
+-author("Peter Tihanyi").
 
 %% API
 -export([set/1, get/0, join/1, leave/1, status/0]).

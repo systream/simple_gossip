@@ -1,12 +1,12 @@
 %%%-------------------------------------------------------------------
-%%% @author tihanyipeter
-%%% @copyright (C) 2020, <COMPANY>
+%%% @author Peter Tihanyi
+%%% @copyright (C) 2020, Systream
 %%% @doc
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_server).
--author("tihanyipeter").
+-author("Peter Tihanyi").
 
 -behaviour(gen_server).
 
@@ -122,11 +122,11 @@ handle_call({join, Node}, _From, #state{nodes = Nodes} = State) ->
   end;
 handle_call({leave, Node}, _From, #state{nodes = Nodes} = State) ->
   {reply, ok, increase_version(State#state{nodes = lists:delete(Node, Nodes)})};
+
 handle_call(status, From, #state{nodes = Nodes, gossip_version = Version, claimant = Claimant} = State) ->
   spawn(fun() ->
-        Ref = make_ref(),
-        Self = self(),
-        [gen_server:cast({?MODULE, Node}, {get_gossip_version, Self, Ref}) || Node <- Nodes],
+        Ref = make_ref(), Self = self(),
+        gen_server:abcast(Nodes, ?MODULE, {get_gossip_version, Self, Ref}),
         Result = case receive_gossip_version(Ref, Nodes, {ok, Version}) of
                     {ok, Ver} ->
                       {ok, Ver, Claimant, Nodes};
@@ -151,9 +151,10 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({reconcile, #state{gossip_version = InVersion} = InState},
-                        #state{gossip_version = Version}) when InVersion > Version ->
-  gossip(InState),
-  {noreply, InState};
+                        #state{gossip_version = Version} = CurrentState) when InVersion > Version ->
+  NewState = change_state(CurrentState, InState),
+  gossip(NewState),
+  {noreply, NewState};
 handle_cast({reconcile, _}, State) ->
   {noreply, State};
 
@@ -178,7 +179,15 @@ handle_cast({get_gossip_version, Requester, Ref}, State = #state{gossip_version 
 handle_info(tick, State) ->
   gossip_random_node(State),
   schedule_gossip(State),
+  {noreply, State};
+handle_info({nodedown, Node}, #state{claimant = Node} = State) ->
+  % panic: claimant node is down, every node became claimant for it self,
+  % and when the next set comes the new claimant will be that node
+  NewState = increase_version(State#state{claimant = node()}),
+  {noreply, NewState};
+handle_info({nodedown, _}, State) ->
   {noreply, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -259,3 +268,13 @@ receive_gossip_version(Ref, [Node | Nodes], {ok, Vsn}) ->
   end;
 receive_gossip_version(_, _, Result) ->
   Result.
+
+
+change_state(#state{claimant = Claimant},
+             #state{claimant = Claimant} = NewState) ->
+  NewState;
+change_state(#state{claimant = OldClaimant},
+             #state{claimant = NewClaimant} = NewState) ->
+  erlang:monitor_node(NewClaimant, true),
+  erlang:monitor_node(OldClaimant, false),
+  NewState.
