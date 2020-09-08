@@ -11,8 +11,8 @@
 %% API
 -export([set/1, get/0, join/1, leave/1, status/0]).
 
-
--spec set(term()) -> ok.
+-spec set(Status | fun((Status) -> {change, Status} | no_change)) -> ok when
+  Status :: term().
 set(Data) ->
   simple_gossip_server:set(Data).
 
@@ -28,6 +28,10 @@ join(Node) ->
 leave(Node) ->
   simple_gossip_server:leave(Node).
 
--spec status() -> {ok, Vsn :: pos_integer(), Claimant :: node(), Nodes :: [node()]} | {error, timeout} | mismatch.
+-spec status() ->
+  {ok, Vsn, Claimant, Nodes} | {error, timeout} | mismatch when
+  Vsn :: pos_integer(),
+  Claimant :: node(),
+  Nodes :: [node()].
 status() ->
   simple_gossip_server:status().

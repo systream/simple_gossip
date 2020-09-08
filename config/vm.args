@@ -1,0 +1,6 @@
+-sname simple_gossip
+
+-setcookie simple_gossip
+
++K true
++A4

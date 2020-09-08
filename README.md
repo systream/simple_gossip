@@ -9,6 +9,19 @@ Infect state information around the cluster via gossipping.
 simple_gossip:set(<<"hello world">>).
 ```
 
+Or 
+
+```erlang
+simple_gossip:set(fun(State) -> 
+                    case State rem 10 of 
+                      0 -> 
+                        no_change; 
+                      Rem -> 
+                        {change, State+(10-Rem)} 
+                    end
+                end).
+```
+
 ## Retrieve data
 ```erlang
 <<"hello world">> = simple_gossip:get().

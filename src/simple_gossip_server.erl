@@ -24,17 +24,18 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {gossip_version = 1 :: pos_integer(),
-                nodes = [] :: [node()],
                 data :: any(),
+                claimant :: node(),
+                nodes = [] :: [node()],
                 max_gossip_per_period = 8 :: pos_integer(),
-                gossip_period = 10000 :: pos_integer(),
-                claimant :: node()
+                gossip_period = 10000 :: pos_integer()
                 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec set(term()) -> ok.
+-spec set(Status | fun((Status) -> {change, Status} | no_change)) -> ok when
+  Status :: term().
 set(Data) ->
   gen_server:call(?SERVER, {set, Data}).
 
@@ -51,7 +52,10 @@ leave(Node) ->
   gen_server:call(?SERVER, {leave, Node}).
 
 -spec status() ->
-  {ok, Vsn :: pos_integer(), Claimant :: node(), Nodes :: [node()]} | {error, timeout} | mismatch.
+  {ok, Vsn, Claimant, Nodes} | {error, timeout} | mismatch when
+  Vsn :: pos_integer(),
+  Claimant :: node(),
+  Nodes :: [node()].
 status() ->
   gen_server:call(?SERVER, status).
 
@@ -106,22 +110,35 @@ init([]) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(get, _From, #state{data = Data} = State) ->
   {reply, Data, State};
-handle_call({set, Data}, _From, #state{claimant = Claimant} = State) when Claimant == node() ->
+handle_call({set, Data}, _From, #state{claimant = Claimant} = State) when Claimant =/= node() ->
+  {reply, gen_server:call({?MODULE, Claimant}, {set, Data}), State};
+handle_call({set, ChangeFun}, _From, #state{data = Data} = State) when is_function(ChangeFun) ->
+  case ChangeFun(Data) of
+    {change, NewData} ->
+      NewState = increase_version(State#state{data = NewData}),
+      gossip(NewState),
+      {reply, ok, NewState};
+    no_change ->
+      {reply, ok, State}
+  end;
+handle_call({set, Data}, _From, State) ->
   NewState = increase_version(State#state{data = Data}),
   gossip(NewState),
   {reply, ok, NewState};
-handle_call({set, Data}, _From, #state{claimant = Claimant} = State) ->
-  {reply, gen_server:call({?MODULE, Claimant}, {set, Data}), State};
 handle_call({join, Node}, _From, #state{nodes = Nodes} = State) ->
-  net_kernel:connect_node(Node),
   case lists:member(Node, Nodes) of
     true ->
       {reply, ok, State};
     _ ->
-      {reply, ok, increase_version(State#state{nodes = [Node | Nodes]})}
+      net_kernel:connect_node(Node),
+      NewState = increase_version(State#state{nodes = [Node | Nodes]}),
+      gen_server:cast({?MODULE, Node}, {join, node(), NewState}),
+      {reply, ok, NewState}
   end;
 handle_call({leave, Node}, _From, #state{nodes = Nodes} = State) ->
-  {reply, ok, increase_version(State#state{nodes = lists:delete(Node, Nodes)})};
+  NewState = increase_version(State#state{nodes = lists:delete(Node, Nodes)}),
+  gossip(NewState),
+  {reply, ok, NewState};
 
 handle_call(status, From, #state{nodes = Nodes, gossip_version = Version, claimant = Claimant} = State) ->
   spawn(fun() ->
@@ -160,7 +177,17 @@ handle_cast({reconcile, _}, State) ->
 
 handle_cast({get_gossip_version, Requester, Ref}, State = #state{gossip_version = Vsn}) ->
   Requester ! {gossip_vsn, Vsn, Ref, node()},
-  {noreply, State}.
+  {noreply, State};
+
+handle_cast({join, _Node, #state{gossip_version = InGossipVsn} = InState},
+            #state{gossip_version = CurrentGossipVsn}) when InGossipVsn > CurrentGossipVsn ->
+  gossip(InState),
+  {noreply, InState};
+handle_cast({join, Node, #state{gossip_version = InGossipVsn, nodes = Nodes}},
+            #state{gossip_version = CurrentGossipVsn} = State) when InGossipVsn =< CurrentGossipVsn ->
+  NewState = increase_version(State#state{nodes = [Node | Nodes]}),
+  gossip(NewState, Node),
+  {noreply, NewState}.
 
 %%--------------------------------------------------------------------
 %% @private
