@@ -35,7 +35,7 @@ simple_gossip:status().
 Result can be
 * `mismatch`: nodes do not agree on cluster state (try again later)
 * `{error, timeout}`: Cannot retrieve information from cluster nodes in time
-* `{ok, 74, 'node12@cluster', ['node1@cluster', 'node9@cluster', 'node12@cluster']}`: Cluster agreed on the state. Second parameter is the gossip version, third is the claimant node, and the fifth is the list of cluster nodes.  
+* `{ok, 74, 'node12@cluster', ['node1@cluster', 'node9@cluster', 'node12@cluster']}`: Cluster agreed on the state. Second parameter is the gossip version, third is the leader node, and the fifth is the list of cluster nodes.  
 
 ### Join node to cluster
 ```erlang
@@ -52,3 +52,8 @@ Build
 -----
 
     $ rebar3 compile
+    
+Run tests
+-----
+
+    $ rebar3 test
