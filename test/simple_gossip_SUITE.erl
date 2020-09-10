@@ -107,7 +107,8 @@ all() ->
     set_get_via_fun_no_change,
     join_node,
     sync_between_nodes,
-    sync_connecting_node
+    sync_connecting_node,
+    status
   ].
 
 %%--------------------------------------------------------------------
@@ -155,39 +156,44 @@ sync_between_nodes(_Config) ->
   simple_gossip:set("default"),
   Node1 = start_slave_node('sync_1'),
   Node2 = start_slave_node('sync_2'),
-  Node3 = start_slave_node('sync_3'),
   simple_gossip:join(Node1),
   simple_gossip:join(Node2),
-  simple_gossip:join(Node3),
 
   simple_gossip:set("main"),
   ct:sleep(10), % wait a bit to new hosts process the messag
 
   ?assertEqual("main", rpc:call(Node1, simple_gossip, get, [])),
   ?assertEqual("main", rpc:call(Node2, simple_gossip, get, [])),
-  ?assertEqual("main", rpc:call(Node3, simple_gossip, get, [])),
 
   rpc:call(Node1, simple_gossip, set, ["main1"]),
   ct:sleep(10), % wait a bit to new hosts process the messag
 
   ?assertEqual("main1", simple_gossip:get()),
   ?assertEqual("main1", rpc:call(Node2, simple_gossip, get, [])),
-  ?assertEqual("main1", rpc:call(Node3, simple_gossip, get, [])),
 
   rpc:call(Node2, simple_gossip, set, ["main2"]),
   ct:sleep(10), % wait a bit to new hosts process the messag
 
   ?assertEqual("main2", simple_gossip:get()),
   ?assertEqual("main2", rpc:call(Node1, simple_gossip, get, [])),
-  ?assertEqual("main2", rpc:call(Node3, simple_gossip, get, [])),
 
   simple_gossip:leave(Node1),
   simple_gossip:leave(Node2),
-  simple_gossip:leave(Node3),
 
   ct_slave:stop(Node1),
-  ct_slave:stop(Node2),
-  ct_slave:stop(Node3).
+  ct_slave:stop(Node2).
+
+
+status(_Config) ->
+  simple_gossip:set("default"),
+  Node1 = start_slave_node('status_1'),
+  simple_gossip:join(Node1),
+  simple_gossip:set("a"),
+  ct:sleep(4000),
+  Node = node(),
+  ?assertMatch({ok, _, Node, _}, simple_gossip:status()),
+  simple_gossip:leave(Node1),
+  ct_slave:stop(Node1).
 
 
 sync_connecting_node(_Config) ->
@@ -210,8 +216,10 @@ sync_connecting_node(_Config) ->
 
 
 start_slave_node(NodeName) ->
-  ErlFlags = "-pa ../../../../_build/test/lib/*/ebin ",
-  {ok, HostNode} = ct_slave:start(NodeName,
+  EbinDirs =
+    filename:dirname(filename:dirname(code:priv_dir(simple_gossip))) ++ "/*/ebin",
+  ErlFlags = "-pa " ++ EbinDirs,
+  Result = ct_slave:start(NodeName,
     [ {kill_if_fail, true},
       {monitor_master, true},
       {init_timeout, 5},
@@ -219,5 +227,11 @@ start_slave_node(NodeName) ->
       {startup_timeout, 5},
       {startup_functions, [{application, ensure_all_started, [simple_gossip]}]},
       {erl_flags, ErlFlags}]),
-  HostNode.
+
+  case Result of
+    {ok, HostNode} ->
+      HostNode;
+    {error, already_started, HostNode} ->
+      HostNode
+  end.
 

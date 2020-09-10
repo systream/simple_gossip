@@ -25,7 +25,7 @@
 
 -record(state, {gossip_version = 1 :: pos_integer(),
                 data :: any(),
-                claimant :: node(),
+                leader :: node(),
                 nodes = [] :: [node()],
                 max_gossip_per_period = 8 :: pos_integer(),
                 gossip_period = 10000 :: pos_integer()
@@ -52,9 +52,9 @@ leave(Node) ->
   gen_server:call(?SERVER, {leave, Node}).
 
 -spec status() ->
-  {ok, Vsn, Claimant, Nodes} | {error, timeout} | mismatch when
+  {ok, Vsn, Leader, Nodes} | {error, timeout} | mismatch when
   Vsn :: pos_integer(),
-  Claimant :: node(),
+  Leader :: node(),
   Nodes :: [node()].
 status() ->
   gen_server:call(?SERVER, status).
@@ -89,7 +89,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  State = #state{claimant = node(), nodes = [node()]},
+  State = #state{leader = node(), nodes = [node()]},
   schedule_gossip(State),
   {ok, State}.
 
@@ -110,8 +110,14 @@ init([]) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(get, _From, #state{data = Data} = State) ->
   {reply, Data, State};
-handle_call({set, Data}, _From, #state{claimant = Claimant} = State) when Claimant =/= node() ->
-  {reply, gen_server:call({?MODULE, Claimant}, {set, Data}), State};
+handle_call({set, Data}, From, #state{leader = Leader} = State) when Leader =/= node() ->
+  case catch gen_server:call({?MODULE, Leader}, {set, Data}) of
+    ok ->
+      {reply, ok, State};
+    {'EXIT', {{nodedown, Leader}, _}} ->
+      % It seems leader is unreachable elect this node as the leader
+      handle_call({set, Data}, From, promote_myself_as_leader(State))
+  end;
 handle_call({set, ChangeFun}, _From, #state{data = Data} = State) when is_function(ChangeFun) ->
   case ChangeFun(Data) of
     {change, NewData} ->
@@ -125,36 +131,36 @@ handle_call({set, Data}, _From, State) ->
   NewState = increase_version(State#state{data = Data}),
   gossip(NewState),
   {reply, ok, NewState};
-handle_call({join, Node}, _From, #state{nodes = Nodes} = State) ->
-  case lists:member(Node, Nodes) of
-    true ->
-      {reply, ok, State};
-    _ ->
+handle_call({join, Node}, _From, State) ->
+  NewState = maybe_add_node(Node, State,
+    fun(NewState) ->
       net_kernel:connect_node(Node),
-      NewState = increase_version(State#state{nodes = [Node | Nodes]}),
-      gen_server:cast({?MODULE, Node}, {join, node(), NewState}),
-      {reply, ok, NewState}
-  end;
+      NewState2 = increase_version(NewState),
+      gen_server:cast({?MODULE, Node}, {join, node(), NewState2}),
+      NewState2
+    end),
+  {reply, ok, NewState};
 handle_call({leave, Node}, _From, #state{nodes = Nodes} = State) ->
-  NewState = increase_version(State#state{nodes = lists:delete(Node, Nodes)}),
+  NewState =
+    maybe_promote_random_node_as_leader(State#state{nodes = lists:delete(Node, Nodes)}),
   gossip(NewState),
   {reply, ok, NewState};
 
-handle_call(status, From, #state{nodes = Nodes, gossip_version = Version, claimant = Claimant} = State) ->
+handle_call(status, From, #state{nodes = Nodes,
+                                 gossip_version = Version,
+                                 leader = Leader} = State) ->
   spawn(fun() ->
-        Ref = make_ref(), Self = self(),
-        gen_server:abcast(Nodes, ?MODULE, {get_gossip_version, Self, Ref}),
-        Result = case receive_gossip_version(Ref, Nodes, {ok, Version}) of
-                    {ok, Ver} ->
-                      {ok, Ver, Claimant, Nodes};
-                    Else ->
-                      Else
-                  end,
-        gen_server:reply(From, Result)
-         end),
-  {noreply, State};
-handle_call(_Request, _From, State) ->
-  {reply, ok, State}.
+          Ref = make_ref(), Self = self(),
+          gen_server:abcast(Nodes, ?MODULE, {get_gossip_version, Self, Ref}),
+          Result = case receive_gossip_version(Ref, Nodes, {ok, Version}) of
+                      {ok, Ver} ->
+                        {ok, Ver, Leader, Nodes};
+                      Else ->
+                        Else
+                    end,
+          gen_server:reply(From, Result)
+        end),
+  {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -183,9 +189,9 @@ handle_cast({join, _Node, #state{gossip_version = InGossipVsn} = InState},
             #state{gossip_version = CurrentGossipVsn}) when InGossipVsn > CurrentGossipVsn ->
   gossip(InState),
   {noreply, InState};
-handle_cast({join, Node, #state{gossip_version = InGossipVsn, nodes = Nodes}},
+handle_cast({join, Node, #state{gossip_version = InGossipVsn}},
             #state{gossip_version = CurrentGossipVsn} = State) when InGossipVsn =< CurrentGossipVsn ->
-  NewState = increase_version(State#state{nodes = [Node | Nodes]}),
+  NewState = increase_version(maybe_add_node(Node, State)),
   gossip(NewState, Node),
   {noreply, NewState}.
 
@@ -207,11 +213,10 @@ handle_info(tick, State) ->
   gossip_random_node(State),
   schedule_gossip(State),
   {noreply, State};
-handle_info({nodedown, Node}, #state{claimant = Node} = State) ->
-  % panic: claimant node is down, every node became claimant for it self,
-  % and when the next set comes the new claimant will be that node
-  NewState = increase_version(State#state{claimant = node()}),
-  {noreply, NewState};
+handle_info({nodedown, Node}, #state{leader = Node} = State) ->
+  % Panic: Leader node is down! Every node became leader for itself,
+  % and when the next set comes the new leader will be that node
+  {noreply, promote_myself_as_leader(State)};
 handle_info({nodedown, _}, State) ->
   {noreply, State}.
 
@@ -229,7 +234,10 @@ handle_info({nodedown, _}, State) ->
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #state{}) -> term()).
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{nodes = Nodes} = State) ->
+  NewState = maybe_promote_random_node_as_leader(
+                State#state{nodes = lists:delete(node, Nodes)}),
+  gossip(NewState),
   ok.
 
 %%--------------------------------------------------------------------
@@ -290,18 +298,39 @@ receive_gossip_version(Ref, [Node | Nodes], {ok, Vsn}) ->
       receive_gossip_version(Ref, Nodes, {ok, Vsn});
     {gossip_vsn, _, Ref, Node} ->
       receive_gossip_version(Ref, Nodes, mismatch)
-  after 1000 ->
+  after 100 ->
     {error, timeout}
   end;
 receive_gossip_version(_, _, Result) ->
   Result.
 
 
-change_state(#state{claimant = Claimant},
-             #state{claimant = Claimant} = NewState) ->
+change_state(#state{leader = Leader},
+             #state{leader = Leader} = NewState) ->
   NewState;
-change_state(#state{claimant = OldClaimant},
-             #state{claimant = NewClaimant} = NewState) ->
-  erlang:monitor_node(NewClaimant, true),
-  erlang:monitor_node(OldClaimant, false),
+change_state(#state{leader = OldLeader},
+             #state{leader = NewLeader} = NewState) ->
+  erlang:monitor_node(NewLeader, true),
+  erlang:monitor_node(OldLeader, false),
   NewState.
+
+promote_myself_as_leader(State) ->
+  increase_version(State#state{leader = node()}).
+
+maybe_promote_random_node_as_leader(#state{leader = Leader, nodes = Nodes} = State)
+  when Leader == node() andalso Nodes =/= [node()] andalso Nodes =/= [] ->
+  [NewLeader] = pick_random_nodes(Nodes, 1),
+  increase_version(State#state{leader = NewLeader});
+maybe_promote_random_node_as_leader(State) ->
+  State.
+
+maybe_add_node(Node, State) ->
+  maybe_add_node(Node, State, fun(NewState) -> NewState end).
+
+maybe_add_node(Node, #state{nodes = Nodes} = State, Fun) ->
+  case lists:member(Node, Nodes) of
+    true ->
+      State;
+    _ ->
+      Fun(State#state{nodes = [Node | Nodes]})
+  end.

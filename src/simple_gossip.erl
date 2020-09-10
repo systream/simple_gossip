@@ -29,9 +29,9 @@ leave(Node) ->
   simple_gossip_server:leave(Node).
 
 -spec status() ->
-  {ok, Vsn, Claimant, Nodes} | {error, timeout} | mismatch when
+  {ok, Vsn, Leader, Nodes} | {error, timeout} | mismatch when
   Vsn :: pos_integer(),
-  Claimant :: node(),
+  Leader :: node(),
   Nodes :: [node()].
 status() ->
   simple_gossip_server:status().

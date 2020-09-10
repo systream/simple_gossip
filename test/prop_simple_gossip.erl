@@ -29,25 +29,52 @@ prop_set_get_with_fun() ->
       simple_gossip:get() == Payload
     end).
 
-disabled_prop_cluster() ->
+prop_cluster() ->
   application:stop(simple_gossip),
-  net_kernel:start([proper, shortnames]),
+  [Node1 | _] = Nodes = start_cluster(),
   application:ensure_all_started(simple_gossip),
-  Node1 = simple_gossip_SUITE:start_slave_node('prop1'),
-  Node2 = simple_gossip_SUITE:start_slave_node('prop2'),
 
-  Nodes = [Node1, Node2],
-  [simple_gossip:join(Node) || Node <- Nodes],
-
-  timer:sleep(100),
+  [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
   wait_until_cluster_state(),
-  io:format("Status: ~p~n", [simple_gossip:status()]),
 
   ?FORALL({Payload, Node},
-    {term(), oneof([node() | Nodes])},
+    {term(), oneof(Nodes)},
     begin
       rpc:call(Node, simple_gossip, set, [Payload]),
       Payload == simple_gossip:get()
+    end).
+
+prop_cluster_stop_leader() ->
+  [Node1 | _] = Nodes = start_cluster(),
+
+  [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
+
+  % kill the leader,
+  {ok, _, Leader, _} = simple_gossip:status(),
+  AvailableNodes = Nodes -- [Leader],
+  ct_slave:stop(Leader),
+  ?FORALL({Payload, Node},
+    {term(), oneof(AvailableNodes)},
+    begin
+      Result = rpc:call(Node, simple_gossip, set, [Payload]),
+      Result == ok andalso Payload == simple_gossip:get()
+    end).
+
+prop_cluster_kill_leader() ->
+  [Node1 | _] = Nodes = start_cluster(),
+
+  [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
+
+  % kill the leader,
+  {ok, _, Leader, _} = simple_gossip:status(),
+  AvailableNodes = Nodes -- [Leader],
+  rpc:call(Leader, erlang, exit, [whereis(simple_gossip_server), kill]),
+  ct_slave:stop(Leader),
+  ?FORALL({Payload, Node},
+    {term(), oneof(AvailableNodes)},
+    begin
+      Result = rpc:call(Node, simple_gossip, set, [Payload]),
+      Result == ok andalso Payload == simple_gossip:get()
     end).
 
 
@@ -61,6 +88,22 @@ wait_until_cluster_state(N) ->
     Else when N == 0 ->
       Else;
     _ ->
-      timer:sleep(1000),
+      timer:sleep(10),
       wait_until_cluster_state(N-1)
   end.
+
+start_cluster() ->
+  case net_kernel:start([proper, shortnames]) of
+    {error, {already_started, _}} ->
+      ok;
+    {ok, _} ->
+      application:stop(simple_gossip),
+      application:ensure_all_started(simple_gossip)
+  end,
+
+  Node1 = simple_gossip_SUITE:start_slave_node('prop1'),
+  Node2 = simple_gossip_SUITE:start_slave_node('prop2'),
+  Node3 = simple_gossip_SUITE:start_slave_node('prop3'),
+  Node4 = simple_gossip_SUITE:start_slave_node('prop4'),
+
+  [Node1, Node2, Node3, Node4, node()].
