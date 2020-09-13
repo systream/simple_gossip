@@ -41,14 +41,15 @@
                 leader :: node(),
                 nodes = [] :: [node()],
                 max_gossip_per_period = 8 :: pos_integer(),
-                gossip_period = 10000 :: pos_integer(),
-                rumor_record_version = 1 :: pos_integer()
+                gossip_period = 10000 :: pos_integer()
                 }).
 
 -type rumor() :: #rumor{}.
 
 -record(state, {rumor = #rumor{} :: rumor,
-                subscribers = [] :: list(pid())}).
+                subscribers = #{} :: #{pid() := reference()},
+                rumor_record_version = 1 :: pos_integer()
+}).
 
 %%%===================================================================
 %%% API
@@ -156,6 +157,7 @@ handle_call({set, ChangeFun}, _From,
     {change, NewData} ->
       NewRumor = increase_version(Rumor#rumor{data = NewData}),
       gossip(NewRumor),
+      notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
       {reply, ok, State#state{rumor = NewRumor}};
     no_change ->
       {reply, ok, State}
@@ -163,6 +165,7 @@ handle_call({set, ChangeFun}, _From,
 handle_call({set, Data}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = increase_version(Rumor#rumor{data = Data}),
   gossip(NewRumor),
+  notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
   {reply, ok, State#state{rumor = NewRumor}};
 handle_call({join, Node}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = maybe_add_node(Node, Rumor,
@@ -182,14 +185,21 @@ handle_call({leave, Node}, _From, #state{rumor = Rumor} = State) ->
 
 
 handle_call({subscribe, Pid}, _From, #state{subscribers = Subscribers} = State) ->
-  case lists:member(Pid, Subscribers) of
-    true ->
-      {reply, ok, State};
+  case maps:get(Pid, Subscribers, not_found) of
+    not_found ->
+      Ref = monitor(process, Pid),
+      {reply, ok, State#state{subscribers = Subscribers#{Pid => Ref}}};
     _ ->
-      {reply, ok, State#state{subscribers = [Pid | Subscribers]}}
+      {reply, ok, State}
   end;
 handle_call({unsubscribe, Pid}, _From, #state{subscribers = Subscribers} = State) ->
-  {reply, ok, State#state{subscribers = lists:delete(Pid, Subscribers)}};
+  case maps:get(Pid, Subscribers, not_found) of
+    not_found ->
+      {reply, ok, State};
+    Ref ->
+      demonitor(Ref, [flush]),
+      {reply, ok, State#state{subscribers = maps:remove(Pid, Subscribers)}}
+  end;
 
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
                                                gossip_version = Version,
@@ -224,7 +234,7 @@ handle_cast({reconcile,
   when InVersion > Version ->
   NewRumor = change_state(CRumor, InRumor),
   gossip(NewRumor),
-  notify_subscribers(CRumor, InRumor, State#state.subscribers),
+  notify_subscribers(CRumor, InRumor, maps:keys(State#state.subscribers)),
   {noreply, State#state{rumor = NewRumor}};
 handle_cast({reconcile, _}, State) ->
   {noreply, State};
@@ -271,7 +281,11 @@ handle_info({nodedown, Node},
   % and when the next set comes the new leader will be that node
   {noreply, State#state{rumor = promote_myself_as_leader(Rumor)}};
 handle_info({nodedown, _}, State) ->
-  {noreply, State}.
+  {noreply, State};
+handle_info({'DOWN', _, process, Pid, _Reason},
+            State = #state{subscribers = Subscribers}) ->
+  {noreply, State#state{subscribers = maps:remove(Pid, Subscribers)}}.
+
 
 
 %%--------------------------------------------------------------------
