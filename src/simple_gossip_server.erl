@@ -46,16 +46,17 @@
 
 -type rumor() :: #rumor{}.
 
--record(state, {rumor = #rumor{} :: rumor,
+-record(state, {rumor = #rumor{} :: rumor(),
                 subscribers = #{} :: #{pid() := reference()},
                 rumor_record_version = 1 :: pos_integer()
 }).
 
+-type set_fun() ::  fun((term()) -> {change, term()} | no_change).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec set(Status | fun((Status) -> {change, Status} | no_change)) -> ok when
-  Status :: term().
+-spec set(term() | set_fun()) -> ok.
 set(Data) ->
   gen_server:call(?SERVER, {set, Data}).
 
@@ -80,7 +81,7 @@ leave(Node) ->
   gen_server:call(?SERVER, {leave, Node}).
 
 -spec status() ->
-  {ok, Vsn, Leader, Nodes} | {error, timeout} | mismatch when
+  {ok, Vsn, Leader, Nodes} | {error, timeout, Nodes} | mismatch when
   Vsn :: pos_integer(),
   Leader :: node(),
   Nodes :: [node()].
@@ -301,11 +302,9 @@ handle_info({'DOWN', _, process, Pid, _Reason},
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #state{}) -> term()).
-terminate(_Reason, #state{rumor = #rumor{nodes = Nodes, leader = Leader} =
-  Rumor}) when Leader == node() ->
-  NewRumor = maybe_promote_random_node_as_leader(
-              Rumor#rumor{nodes = lists:delete(node(), Nodes)}),
-  gossip(NewRumor),
+terminate(_Reason, #state{rumor = #rumor{leader = Leader} = Rumor})
+  when Leader == node() ->
+  gossip(maybe_promote_random_node_as_leader(Rumor)),
   ok;
 terminate(_Reason, _State) ->
   ok.
@@ -327,13 +326,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec gossip(rumor()) -> ok.
 gossip(#rumor{nodes = []}) ->
   ok;
 gossip(#rumor{nodes = Nodes, max_gossip_per_period = Max} = State) ->
   NewNodes = lists:delete(node(), Nodes),
   RandomNodes = pick_random_nodes(NewNodes, Max),
-  [gossip(State, Node) || Node <- RandomNodes].
+  [gossip(State, Node) || Node <- RandomNodes],
+  ok.
 
+-spec gossip_random_node(rumor()) -> ok.
 gossip_random_node(#rumor{nodes = []}) ->
   ok;
 gossip_random_node(#rumor{nodes = Nodes} = State) ->
@@ -342,39 +344,48 @@ gossip_random_node(#rumor{nodes = Nodes} = State) ->
   [gossip(State, Node) || Node <- RandomNodes],
   ok.
 
-gossip(State, Node) ->
-  gen_server:cast({?MODULE, Node}, {reconcile, State}).
+-spec gossip(rumor(), node()) -> ok.
+gossip(Rumor, Node) ->
+  gen_server:cast({?MODULE, Node}, {reconcile, Rumor}).
 
+-spec pick_random_nodes([node()], non_neg_integer()) -> [node()].
 pick_random_nodes(Nodes, Number) ->
   pick_random_nodes(Nodes, Number, []).
 
+-spec pick_random_nodes([node()], non_neg_integer(), [node()]) -> [node()].
 pick_random_nodes(Nodes, Number, Acc) when Nodes == [] orelse Number == 0 ->
   Acc;
 pick_random_nodes(Nodes, Number, Acc) ->
   Node = lists:nth(rand:uniform(length(Nodes)), Nodes),
   pick_random_nodes(lists:delete(Node, Nodes), Number-1, [Node | Acc]).
 
+-spec schedule_gossip(rumor()) -> reference().
 schedule_gossip(#rumor{gossip_period = Period}) ->
   erlang:send_after(Period, ?SERVER, tick).
 
+-spec increase_version(rumor()) -> rumor().
 increase_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
   Rumor#rumor{gossip_version = GossipVersion+1}.
 
+-spec receive_gossip_version(reference(), [node()], Result) ->
+  Result | {error, timeout, [node()]} when
+  Version :: pos_integer(),
+  Result :: {ok, Version} | mismatch.
 receive_gossip_version(_, [], Vsn) ->
   Vsn;
-receive_gossip_version(Ref, [Node | Nodes], {ok, Vsn}) ->
+receive_gossip_version(Ref, Nodes, {ok, Vsn}) ->
   receive
     {gossip_vsn, Vsn, Ref, Node} ->
-      receive_gossip_version(Ref, Nodes, {ok, Vsn});
+      receive_gossip_version(Ref, lists:delete(Node, Nodes), {ok, Vsn});
     {gossip_vsn, _, Ref, Node} ->
-      receive_gossip_version(Ref, Nodes, mismatch)
-  after 100 ->
-    {error, timeout}
+      mismatch
+  after 1000 ->
+    {error, timeout, Nodes}
   end;
 receive_gossip_version(_, _, Result) ->
   Result.
 
-
+-spec change_state(Current :: rumor(), New :: rumor()) -> rumor().
 change_state(#rumor{leader = Leader},
              #rumor{leader = Leader} = NewRumor) ->
   NewRumor;
@@ -384,16 +395,20 @@ change_state(#rumor{leader = OldLeader},
   erlang:monitor_node(OldLeader, false),
   NewRumor.
 
+-spec notify_subscribers(Current :: rumor(), New :: rumor(), [pid()]) -> ok.
 notify_subscribers(_, _, []) ->
   ok;
 notify_subscribers(#rumor{data = Data}, #rumor{data = Data}, _) ->
   ok;
 notify_subscribers(#rumor{data = _}, #rumor{data = NewData}, Subscribers) ->
-  [ Pid ! {data_changed, NewData} || Pid <- Subscribers].
+  [ Pid ! {data_changed, NewData} || Pid <- Subscribers],
+  ok.
 
+-spec promote_myself_as_leader(rumor()) -> rumor().
 promote_myself_as_leader(Rumor) ->
   increase_version(Rumor#rumor{leader = node()}).
 
+-spec maybe_promote_random_node_as_leader(rumor()) -> rumor().
 maybe_promote_random_node_as_leader(#rumor{nodes = Nodes} = Rumor)
   when Nodes =/= [] ->
   [NewLeader] = pick_random_nodes(Nodes, 1),
@@ -401,9 +416,11 @@ maybe_promote_random_node_as_leader(#rumor{nodes = Nodes} = Rumor)
 maybe_promote_random_node_as_leader(Rumor) ->
   Rumor.
 
-maybe_add_node(Node, State) ->
-  maybe_add_node(Node, State, fun(NewState) -> NewState end).
+-spec maybe_add_node(node(), rumor()) -> rumor().
+maybe_add_node(Node, Rumor) ->
+  maybe_add_node(Node, Rumor, fun(NewRumor) -> NewRumor end).
 
+-spec maybe_add_node(node(), rumor(), set_fun()) -> rumor().
 maybe_add_node(Node, #rumor{nodes = Nodes} = Rumor, Fun) ->
   case lists:member(Node, Nodes) of
     true ->
