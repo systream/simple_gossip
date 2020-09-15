@@ -37,11 +37,11 @@ prop_cluster() ->
   [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
   wait_until_cluster_state(),
 
-  ?FORALL({Payload, Node},
-    {term(), oneof(Nodes)},
+  ?FORALL({Payload, Node, GetNode},
+    {term(), oneof(Nodes), oneof(Nodes)},
     begin
       rpc:call(Node, simple_gossip, set, [Payload]),
-      Payload == simple_gossip:get()
+      Payload == rpc:call(GetNode, simple_gossip, get, [])
     end).
 
 prop_cluster_stop_leader() ->
@@ -52,6 +52,7 @@ prop_cluster_stop_leader() ->
   % kill the leader,
   {ok, _, Leader, _} = simple_gossip:status(),
   AvailableNodes = Nodes -- [Leader],
+  rpc:call(Leader, application, stop, [simple_gossip]),
   ct_slave:stop(Leader),
   ?FORALL({Payload, Node},
     {term(), oneof(AvailableNodes)},

@@ -1,30 +1,28 @@
 simple_gossip
 =====
 
-Simple implementation of random gossip protocol. 
+Simple implementation of gossip protocol. 
 Infect state information around the cluster via gossipping.
 
 ## Set data
 ```erlang
-simple_gossip:set(<<"hello world">>).
+ok = simple_gossip:set({<<"hello world">>, 0}).
 ```
-
 Or 
-
 ```erlang
-simple_gossip:set(fun(State) -> 
-                    case State rem 10 of 
+ok = simple_gossip:set(fun({Text, Counter}) -> 
+                    case Counter rem 10 of 
                       0 -> 
                         no_change; 
                       Rem -> 
-                        {change, State+(10-Rem)} 
+                        {change, {Text, Counter+(10-Rem)}} 
                     end
                 end).
 ```
 
 ## Retrieve data
 ```erlang
-<<"hello world">> = simple_gossip:get().
+{<<"hello world">>, 0} = simple_gossip:get().
 ```
 
 ### Get cluster state. 
@@ -33,9 +31,24 @@ simple_gossip:status().
 ```
 
 Result can be
-* `mismatch`: nodes do not agree on cluster state (try again later)
-* `{error, timeout}`: Cannot retrieve information from cluster nodes in time
-* `{ok, 74, 'node12@cluster', ['node1@cluster', 'node9@cluster', 'node12@cluster']}`: Cluster agreed on the state. Second parameter is the gossip version, third is the leader node, and the fifth is the list of cluster nodes.  
+* `{ok, GossipVsn, LeaderNpde, NodesInTheCluster}`
+* `mismatch`: Nodes do not agree on cluster state (different GossipVsn around the
+ cluster) try again later
+* `{error, timeout, NodesDoesNotResponse}`: Cannot retrieve information from cluster nodes in time
+
+### Subscribe to cluster changes
+```erlang
+simple_gossip:subscribe(self()).
+```
+
+It will send a message `{data_changed, {<<"hello world">>,0}}` to the given
+ process's inbox when the data has been changed.
+
+
+### Unsubscribe from cluster changes
+```erlang
+simple_gossip:unsubscribe(self()).
+```
 
 ### Join node to cluster
 ```erlang

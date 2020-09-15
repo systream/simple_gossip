@@ -1,12 +1,12 @@
 %%%-------------------------------------------------------------------
-%%% @author tihanyipeter
-%%% @copyright (C) 2020, <COMPANY>
+%%% @author Peter Tihanyi
+%%% @copyright (C) 2020, Systream
 %%% @doc
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_SUITE).
--author("tihanyipeter").
+-author("Pete Tihanyi").
 
 %% API
 -compile(export_all).
@@ -105,6 +105,8 @@ all() ->
   [ set_get,
     set_get_via_fun,
     set_get_via_fun_no_change,
+    notify_change,
+    notify_change_not_on_leader,
     join_node,
     sync_between_nodes,
     sync_connecting_node,
@@ -140,6 +142,50 @@ set_get_via_fun_no_change(_Config) ->
     no_change
                     end),
   ?assertEqual("Prev", simple_gossip:get()).
+
+notify_change(_Config) ->
+  application:ensure_all_started(simple_gossip),
+  Ref = make_ref(),
+  ok =simple_gossip:subscribe(self()),
+  ok = simple_gossip:subscribe(self()), % check double subscribe -> should no effect
+  simple_gossip:set({"new", Ref}),
+  ?assertMatch({ok, _}, receive_notify(Ref)),
+
+  simple_gossip:unsubscribe(self()),
+
+  Ref2 = make_ref(),
+  simple_gossip:set({"new2", Ref2}),
+  ?assertMatch(timeout, receive_notify(Ref)),
+  simple_gossip:unsubscribe(self()).
+
+notify_change_not_on_leader(_Config) ->
+  NodeName = 'notify1',
+  Host = start_slave_node(NodeName),
+  simple_gossip:join(Host),
+  ct:sleep(10), % wait a bit to new host process the message
+  ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
+  ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
+
+  spawn(fun() ->
+          timer:sleep(10),
+          simple_gossip:subscribe(self())
+        end),
+
+  spawn(fun() ->
+          timer:sleep(10),
+          ok = rpc:call(Host, simple_gossip, subscribe, [self()])
+        end),
+
+  ok = simple_gossip:subscribe(self()),
+
+  Ref = make_ref(),
+  simple_gossip:set({"test", Ref}),
+  ?assertMatch({ok, _}, receive_notify(Ref)),
+  ?assertMatch({ok, _}, receive_notify(Ref)),
+
+  simple_gossip:leave(Host),
+  ct_slave:stop(Host),
+  ok.
 
 join_node(_Config) ->
   simple_gossip:set("test_11"),
@@ -235,3 +281,10 @@ start_slave_node(NodeName) ->
       HostNode
   end.
 
+receive_notify(Ref) ->
+  receive
+    {data_changed, {Data, Ref}} ->
+      {ok, Data}
+  after 1000 ->
+    timeout
+  end.
