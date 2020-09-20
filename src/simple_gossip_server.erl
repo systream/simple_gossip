@@ -118,10 +118,20 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  Rumor = #rumor{leader = node(), nodes = [node()]},
+  Rumor = init_rumor(),
   State = #state{rumor = Rumor},
   schedule_gossip(Rumor),
   {ok, State}.
+
+-spec init_rumor() -> rumor().
+init_rumor() ->
+  init_rumor(1).
+
+-spec init_rumor(pos_integer()) -> rumor().
+init_rumor(GossipVsn) ->
+  #rumor{leader = node(),
+         nodes = [node()],
+         gossip_version = GossipVsn}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -140,51 +150,8 @@ init([]) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(get, _From, #state{rumor = #rumor{data = Data}} = State) ->
   {reply, Data, State};
-handle_call({set, Data}, From, #state{rumor = #rumor{leader = Leader}} = State)
-  when Leader =/= node() ->
-  case catch gen_server:call({?MODULE, Leader}, {set, Data}) of
-    ok ->
-      {reply, ok, State};
-    {'EXIT', {{nodedown, Leader}, _}} ->
-      % It seems leader is unreachable elect this node as the leader
-      Rumor = State#state.rumor,
-      handle_call({set, Data}, From,
-                  State#state{rumor = promote_myself_as_leader(Rumor)})
-  end;
-handle_call({set, ChangeFun}, _From,
-            #state{rumor = #rumor{data = Data} = Rumor} = State)
-  when is_function(ChangeFun) ->
-  case ChangeFun(Data) of
-    {change, NewData} ->
-      NewRumor = increase_version(Rumor#rumor{data = NewData}),
-      gossip(NewRumor),
-      notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
-      {reply, ok, State#state{rumor = NewRumor}};
-    no_change ->
-      {reply, ok, State}
-  end;
-handle_call({set, Data}, _From, #state{rumor = Rumor} = State) ->
-  NewRumor = increase_version(Rumor#rumor{data = Data}),
-  gossip(NewRumor),
-  notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
-  {reply, ok, State#state{rumor = NewRumor}};
-handle_call({join, Node}, _From, #state{rumor = Rumor} = State) ->
-  NewRumor = maybe_add_node(Node, Rumor,
-    fun(NewRumor) ->
-      net_kernel:connect_node(Node),
-      NewRumor2 = increase_version(NewRumor),
-      gen_server:cast({?MODULE, Node}, {join, node(), NewRumor2}),
-      NewRumor2
-    end),
-  {reply, ok, State#state{rumor = NewRumor}};
-handle_call({leave, Node}, _From, #state{rumor = Rumor} = State) ->
-  Nodes = Rumor#rumor.nodes,
-  NewRumor = Rumor#rumor{nodes = lists:delete(Node, Nodes)},
-  NewRumor2 = maybe_promote_random_node_as_leader(NewRumor),
-  gossip(NewRumor2),
-  {reply, ok, State#state{rumor = NewRumor2}};
-
-
+handle_call({set, Data}, From, State) ->
+  proxy_call({set, Data}, From, State);
 handle_call({subscribe, Pid}, _From, #state{subscribers = Subscribers} = State) ->
   case maps:get(Pid, Subscribers, not_found) of
     not_found ->
@@ -216,7 +183,53 @@ handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
                     end,
           gen_server:reply(From, Result)
         end),
-  {noreply, State}.
+  {noreply, State};
+handle_call(Command, From, State) ->
+  proxy_call(Command, From, State).
+
+
+-spec(handle_command(Request :: term(), From :: {pid(), Tag :: term()},
+                  State :: #state{}) ->
+                   {reply, Reply :: term(), NewState :: #state{}} |
+                   {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
+                   {noreply, NewState :: #state{}} |
+                   {noreply, NewState :: #state{}, timeout() | hibernate} |
+                   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
+                   {stop, Reason :: term(), NewState :: #state{}}).
+handle_command({set, ChangeFun}, _From,
+            #state{rumor = #rumor{data = Data} = Rumor} = State)
+  when is_function(ChangeFun) ->
+  case ChangeFun(Data) of
+    {change, NewData} ->
+      NewRumor = increase_version(Rumor#rumor{data = NewData}),
+      gossip(NewRumor),
+      notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
+      {reply, ok, State#state{rumor = NewRumor}};
+    no_change ->
+      {reply, ok, State}
+  end;
+handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
+  NewRumor = increase_version(Rumor#rumor{data = Data}),
+  gossip(NewRumor),
+  notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
+  {reply, ok, State#state{rumor = NewRumor}};
+
+handle_command({join, Node}, _From, #state{rumor = Rumor} = State) ->
+  NewRumor = maybe_add_node(Node, Rumor,
+                            fun(NewRumor) ->
+                              net_kernel:connect_node(Node),
+                              NewRumor2 = increase_version(NewRumor),
+                              gen_server:cast({?MODULE, Node}, {join, node(), NewRumor2}),
+                              NewRumor2
+                            end),
+  {reply, ok, State#state{rumor = NewRumor}};
+
+handle_command({leave, Node}, _From, #state{rumor = Rumor} = State) ->
+  Nodes = Rumor#rumor.nodes,
+  NewRumor = check_node_exclude(Rumor#rumor{nodes = lists:delete(Node, Nodes)}),
+  NewRumor2 = maybe_promote_random_node_as_leader(NewRumor),
+  gossip(NewRumor2),
+  {reply, ok, State#state{rumor = NewRumor2}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -233,9 +246,9 @@ handle_cast({reconcile,
              #rumor{gossip_version = InVersion} = InRumor},
              #state{rumor = #rumor{gossip_version = Version} = CRumor} = State)
   when InVersion > Version ->
-  NewRumor = change_state(CRumor, InRumor),
+  NewRumor = check_leader_change(CRumor, check_node_exclude(InRumor)),
   gossip(NewRumor),
-  notify_subscribers(CRumor, InRumor, maps:keys(State#state.subscribers)),
+  notify_subscribers(CRumor, NewRumor, maps:keys(State#state.subscribers)),
   {noreply, State#state{rumor = NewRumor}};
 handle_cast({reconcile, _}, State) ->
   {noreply, State};
@@ -286,7 +299,6 @@ handle_info({nodedown, _}, State) ->
 handle_info({'DOWN', _, process, Pid, _Reason},
             State = #state{subscribers = Subscribers}) ->
   {noreply, State#state{subscribers = maps:remove(Pid, Subscribers)}}.
-
 
 
 %%--------------------------------------------------------------------
@@ -368,29 +380,28 @@ increase_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
   Rumor#rumor{gossip_version = GossipVersion+1}.
 
 -spec receive_gossip_version(reference(), [node()], Result) ->
-  Result | {error, timeout, [node()]} when
+  FinalResult when
   Version :: pos_integer(),
-  Result :: {ok, Version} | mismatch.
+  Result :: {ok, Version} | mismatch,
+  FinalResult :: Result | {error, timeout, [node()]}.
 receive_gossip_version(_, [], Vsn) ->
   Vsn;
 receive_gossip_version(Ref, Nodes, {ok, Vsn}) ->
   receive
     {gossip_vsn, Vsn, Ref, Node} ->
       receive_gossip_version(Ref, lists:delete(Node, Nodes), {ok, Vsn});
-    {gossip_vsn, _, Ref, Node} ->
+    {gossip_vsn, _, Ref, _Node} ->
       mismatch
   after 1000 ->
     {error, timeout, Nodes}
-  end;
-receive_gossip_version(_, _, Result) ->
-  Result.
+  end.
 
--spec change_state(Current :: rumor(), New :: rumor()) -> rumor().
-change_state(#rumor{leader = Leader},
-             #rumor{leader = Leader} = NewRumor) ->
+-spec check_leader_change(Current :: rumor(), New :: rumor()) -> rumor().
+check_leader_change(#rumor{leader = Leader},
+                    #rumor{leader = Leader} = NewRumor) ->
   NewRumor;
-change_state(#rumor{leader = OldLeader},
-             #rumor{leader = NewLeader} = NewRumor) ->
+check_leader_change(#rumor{leader = OldLeader},
+                    #rumor{leader = NewLeader} = NewRumor) ->
   erlang:monitor_node(NewLeader, true),
   erlang:monitor_node(OldLeader, false),
   NewRumor.
@@ -428,3 +439,26 @@ maybe_add_node(Node, #rumor{nodes = Nodes} = Rumor, Fun) ->
     _ ->
       Fun(Rumor#rumor{nodes = [Node | Nodes]})
   end.
+
+-spec check_node_exclude(rumor()) -> rumor().
+check_node_exclude(#rumor{nodes = Nodes} = Rumor) ->
+  case lists:member(node(), Nodes) of
+    true ->
+      Rumor;
+    _ ->
+      init_rumor(Rumor#rumor.gossip_version+1)
+  end.
+
+proxy_call(Command, From, #state{rumor = #rumor{leader = Leader}} = State)
+  when Leader =/= node() ->
+  case catch gen_server:call({?MODULE, Leader}, Command) of
+    {'EXIT', {{nodedown, Leader}, _}} ->
+      % It seems leader is unreachable elect this node as the leader
+      Rumor = promote_myself_as_leader(State#state.rumor),
+      gossip(Rumor),
+      handle_command(Command, From, State#state{rumor = Rumor});
+    Else ->
+      {reply, Else, State}
+  end;
+proxy_call(Command, From, State) ->
+  handle_command(Command, From, State).

@@ -35,7 +35,7 @@ prop_cluster() ->
   application:ensure_all_started(simple_gossip),
 
   [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
-  wait_until_cluster_state(),
+  ok = wait_until_cluster_reconcile(),
 
   ?FORALL({Payload, Node, GetNode},
     {term(), oneof(Nodes), oneof(Nodes)},
@@ -79,10 +79,10 @@ prop_cluster_kill_leader() ->
     end).
 
 
-wait_until_cluster_state() ->
-  wait_until_cluster_state(10).
+wait_until_cluster_reconcile() ->
+  wait_until_cluster_reconcile(10).
 
-wait_until_cluster_state(N) ->
+wait_until_cluster_reconcile(N) ->
   case simple_gossip:status() of
     {ok, _, _, _} ->
       ok;
@@ -90,10 +90,13 @@ wait_until_cluster_state(N) ->
       Else;
     _ ->
       timer:sleep(10),
-      wait_until_cluster_state(N-1)
+      wait_until_cluster_reconcile(N- 1)
   end.
 
 start_cluster() ->
+  start_cluster(['prop1', 'prop2', 'prop3', 'prop4']).
+
+start_cluster(NodeNames) ->
   case net_kernel:start([proper, shortnames]) of
     {error, {already_started, _}} ->
       ok;
@@ -102,9 +105,7 @@ start_cluster() ->
       application:ensure_all_started(simple_gossip)
   end,
 
-  Node1 = simple_gossip_SUITE:start_slave_node('prop1'),
-  Node2 = simple_gossip_SUITE:start_slave_node('prop2'),
-  Node3 = simple_gossip_SUITE:start_slave_node('prop3'),
-  Node4 = simple_gossip_SUITE:start_slave_node('prop4'),
+  NodeList =
+    [simple_gossip_SUITE:start_slave_node(NodeName) || NodeName <- NodeNames],
 
-  [Node1, Node2, Node3, Node4, node()].
+  NodeList ++ [node()].

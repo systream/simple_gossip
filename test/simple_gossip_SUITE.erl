@@ -67,6 +67,7 @@ end_per_group(_GroupName, _Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_testcase(_TestCase, Config) ->
+  application:ensure_all_started(simple_gossip),
   Config.
 
 %%--------------------------------------------------------------------
@@ -108,6 +109,8 @@ all() ->
     notify_change,
     notify_change_not_on_leader,
     join_node,
+    leave_self,
+    leave_by_another_node,
     sync_between_nodes,
     sync_connecting_node,
     status
@@ -162,7 +165,7 @@ notify_change_not_on_leader(_Config) ->
   NodeName = 'notify1',
   Host = start_slave_node(NodeName),
   simple_gossip:join(Host),
-  ct:sleep(10), % wait a bit to new host process the message
+  wait_to_reconcile(),
   ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
   ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
 
@@ -192,11 +195,27 @@ join_node(_Config) ->
   NodeName = 'test1',
   Host = start_slave_node(NodeName),
   simple_gossip:join(Host),
-  ct:sleep(10), % wait a bit to new host process the message
+  wait_to_reconcile(),
   ?assertEqual("test_11", rpc:call(Host, simple_gossip, get, [])),
   simple_gossip:leave(Host),
   ct_slave:stop(Host).
 
+leave_self(_Config) ->
+  ?assertEqual(ok, simple_gossip:leave(node())),
+  Node = node(),
+  ?assertMatch({ok, _, Node, [Node]}, simple_gossip:status()).
+
+leave_by_another_node(_Config) ->
+  NodeName = 'test_leave_test',
+  Node = start_slave_node(NodeName),
+  simple_gossip:join(Node),
+  wait_to_reconcile(),
+  SelfNode = node(),
+  rpc:call(Node, simple_gossip, leave, [SelfNode]),
+  wait_to_reconcile(),
+  ?assertMatch({ok, _, SelfNode, [SelfNode]}, simple_gossip:status()),
+  simple_gossip:leave(Node),
+  ct_slave:stop(Node).
 
 sync_between_nodes(_Config) ->
   simple_gossip:set("default"),
@@ -206,19 +225,19 @@ sync_between_nodes(_Config) ->
   simple_gossip:join(Node2),
 
   simple_gossip:set("main"),
-  ct:sleep(10), % wait a bit to new hosts process the messag
+  wait_to_reconcile(),
 
   ?assertEqual("main", rpc:call(Node1, simple_gossip, get, [])),
   ?assertEqual("main", rpc:call(Node2, simple_gossip, get, [])),
 
   rpc:call(Node1, simple_gossip, set, ["main1"]),
-  ct:sleep(10), % wait a bit to new hosts process the messag
+  wait_to_reconcile(),
 
   ?assertEqual("main1", simple_gossip:get()),
   ?assertEqual("main1", rpc:call(Node2, simple_gossip, get, [])),
 
   rpc:call(Node2, simple_gossip, set, ["main2"]),
-  ct:sleep(10), % wait a bit to new hosts process the messag
+  wait_to_reconcile(),
 
   ?assertEqual("main2", simple_gossip:get()),
   ?assertEqual("main2", rpc:call(Node1, simple_gossip, get, [])),
@@ -235,7 +254,7 @@ status(_Config) ->
   Node1 = start_slave_node('status_1'),
   simple_gossip:join(Node1),
   simple_gossip:set("a"),
-  ct:sleep(4000),
+  wait_to_reconcile(),
   Node = node(),
   ?assertMatch({ok, _, Node, _}, simple_gossip:status()),
   simple_gossip:leave(Node1),
@@ -251,7 +270,7 @@ sync_connecting_node(_Config) ->
   ?assertEqual("default", simple_gossip:get()),
 
   simple_gossip:set("main"),
-  ct:sleep(10), % wait a bit to new hosts process the messag
+  wait_to_reconcile(),
 
   ?assertEqual("main", simple_gossip:get()),
   ?assertEqual("main", rpc:call(Node1, simple_gossip, get, [])),
@@ -288,3 +307,19 @@ receive_notify(Ref) ->
   after 1000 ->
     timeout
   end.
+
+
+wait_to_reconcile() ->
+  Master = self(),
+  Pid =
+    spawn(fun F() -> case simple_gossip:status() of
+                       mismatch ->
+                         timer:sleep(10),
+                         F();
+                       Result ->
+                         Master ! {self(), Result}
+                     end
+          end),
+  R = receive {Pid, Result} -> Result after 1400 -> timeout end,
+  exit(Pid, kill),
+  R.
