@@ -113,7 +113,9 @@ all() ->
     leave_by_another_node,
     sync_between_nodes,
     sync_connecting_node,
-    status
+    status,
+    status_timeout
+    %%status_mismatch
   ].
 
 %%--------------------------------------------------------------------
@@ -260,6 +262,29 @@ status(_Config) ->
   simple_gossip:leave(Node1),
   ct_slave:stop(Node1).
 
+status_timeout(_Config) ->
+  simple_gossip:set("default"),
+  Node = 'test_no_node@local',
+  simple_gossip:join(Node),
+  ?assertMatch({error, {timeout, [Node]}}, simple_gossip:status()),
+  simple_gossip:leave(Node).
+
+
+%%status_mismatch(_Config) ->
+%%  simple_gossip:set("default"),
+%%  Node = start_slave_node('status_2'),
+%%  simple_gossip:join(Node),
+%%  ok = wait_to_reconcile(),
+
+%%  Rumor = {rumor, 1000, tweaked_data, Node, [Node], 8, 10000},
+
+%%  gen_server:cast({simple_gossip_server, Node}, {reconcile, Rumor}),
+%%  ct:sleep(10),
+
+%%  ?assertMatch({error, mismatch}, simple_gossip:status()),
+%%  simple_gossip:leave(Node),
+%%  ct_slave:stop(Node).
+
 
 sync_connecting_node(_Config) ->
   simple_gossip:set("default"),
@@ -312,9 +337,10 @@ receive_notify(Ref) ->
 wait_to_reconcile() ->
   Master = self(),
   Pid =
-    spawn(fun F() -> case simple_gossip:status() of
+    spawn(fun F() ->
+                    timer:sleep(10),
+                    case simple_gossip:status() of
                        mismatch ->
-                         timer:sleep(10),
                          F();
                        Result ->
                          Master ! {self(), Result}

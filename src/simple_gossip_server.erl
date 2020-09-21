@@ -81,7 +81,7 @@ leave(Node) ->
   gen_server:call(?SERVER, {leave, Node}).
 
 -spec status() ->
-  {ok, Vsn, Leader, Nodes} | {error, timeout, Nodes} | mismatch when
+  {ok, Vsn, Leader, Nodes} | {error, {timeout, Nodes} | mismatch} when
   Vsn :: pos_integer(),
   Leader :: node(),
   Nodes :: [node()].
@@ -228,7 +228,8 @@ handle_command({leave, Node}, _From, #state{rumor = Rumor} = State) ->
   Nodes = Rumor#rumor.nodes,
   NewRumor = check_node_exclude(Rumor#rumor{nodes = lists:delete(Node, Nodes)}),
   NewRumor2 = maybe_promote_random_node_as_leader(NewRumor),
-  gossip(NewRumor2),
+  gossip(NewRumor2, Node), % send the new state to the leaving node
+  gossip(NewRumor2), % normal gossip
   {reply, ok, State#state{rumor = NewRumor2}}.
 
 %%--------------------------------------------------------------------
@@ -314,9 +315,10 @@ handle_info({'DOWN', _, process, Pid, _Reason},
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #state{}) -> term()).
-terminate(_Reason, #state{rumor = #rumor{leader = Leader} = Rumor})
+terminate(_Reason, #state{rumor = #rumor{leader = Leader, nodes = Nodes} = Rumor})
   when Leader == node() ->
-  gossip(maybe_promote_random_node_as_leader(Rumor)),
+  NewRumor = Rumor#rumor{nodes = lists:delete(Leader, Nodes)},
+  gossip(maybe_promote_random_node_as_leader(NewRumor)),
   ok;
 terminate(_Reason, _State) ->
   ok.
@@ -339,24 +341,23 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 -spec gossip(rumor()) -> ok.
-gossip(#rumor{nodes = []}) ->
-  ok;
-gossip(#rumor{nodes = Nodes, max_gossip_per_period = Max} = State) ->
+gossip(#rumor{nodes = Nodes} = Rumor) ->
   NewNodes = lists:delete(node(), Nodes),
-  RandomNodes = pick_random_nodes(NewNodes, Max),
-  [gossip(State, Node) || Node <- RandomNodes],
-  ok.
+  gossip(Rumor, NewNodes).
 
 -spec gossip_random_node(rumor()) -> ok.
 gossip_random_node(#rumor{nodes = []}) ->
   ok;
-gossip_random_node(#rumor{nodes = Nodes} = State) ->
+gossip_random_node(#rumor{nodes = Nodes} = Rumor) ->
   NewNodes = lists:delete(node(), Nodes),
   RandomNodes = pick_random_nodes(NewNodes, 1),
-  [gossip(State, Node) || Node <- RandomNodes],
-  ok.
+  gossip(Rumor, RandomNodes).
 
--spec gossip(rumor(), node()) -> ok.
+-spec gossip(rumor(), node() | [node()]) -> ok.
+gossip(#rumor{max_gossip_per_period = Max} = Rumor, Nodes) when is_list(Nodes) ->
+  RandomNodes = pick_random_nodes(Nodes, Max),
+  [gossip(Rumor, Node) || Node <- RandomNodes],
+  ok;
 gossip(Rumor, Node) ->
   gen_server:cast({?MODULE, Node}, {reconcile, Rumor}).
 
@@ -382,8 +383,8 @@ increase_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
 -spec receive_gossip_version(reference(), [node()], Result) ->
   FinalResult when
   Version :: pos_integer(),
-  Result :: {ok, Version} | mismatch,
-  FinalResult :: Result | {error, timeout, [node()]}.
+  Result :: {ok, Version},
+  FinalResult :: Result | {error, {timeout, [node()]} | mismatch}.
 receive_gossip_version(_, [], Vsn) ->
   Vsn;
 receive_gossip_version(Ref, Nodes, {ok, Vsn}) ->
@@ -391,9 +392,9 @@ receive_gossip_version(Ref, Nodes, {ok, Vsn}) ->
     {gossip_vsn, Vsn, Ref, Node} ->
       receive_gossip_version(Ref, lists:delete(Node, Nodes), {ok, Vsn});
     {gossip_vsn, _, Ref, _Node} ->
-      mismatch
+      {error, mismatch}
   after 1000 ->
-    {error, timeout, Nodes}
+    {error, {timeout, Nodes}}
   end.
 
 -spec check_leader_change(Current :: rumor(), New :: rumor()) -> rumor().
@@ -451,14 +452,14 @@ check_node_exclude(#rumor{nodes = Nodes} = Rumor) ->
 
 proxy_call(Command, From, #state{rumor = #rumor{leader = Leader}} = State)
   when Leader =/= node() ->
-  case catch gen_server:call({?MODULE, Leader}, Command) of
-    {'EXIT', {{nodedown, Leader}, _}} ->
-      % It seems leader is unreachable elect this node as the leader
-      Rumor = promote_myself_as_leader(State#state.rumor),
-      gossip(Rumor),
-      handle_command(Command, From, State#state{rumor = Rumor});
-    Else ->
-      {reply, Else, State}
-  end;
+    case catch gen_server:call({?MODULE, Leader}, Command) of
+      {'EXIT', {{nodedown, Leader}, _}} ->
+        % It seems leader is unreachable elect this node as the leader
+        Rumor = promote_myself_as_leader(State#state.rumor),
+        gossip(Rumor),
+        handle_command(Command, From, State#state{rumor = Rumor});
+      Else ->
+        {reply, Else, State}
+    end;
 proxy_call(Command, From, State) ->
   handle_command(Command, From, State).

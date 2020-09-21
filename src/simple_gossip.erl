@@ -44,7 +44,7 @@ leave(Node) ->
 
 %% @doc Check cluster status
 -spec status() ->
-  {ok, Vsn, Leader, Nodes} | {error, timeout, Nodes} | mismatch when
+  {ok, Vsn, Leader, Nodes} | {error, {timeout, Nodes} | mismatch} when
   Vsn :: pos_integer(),
   Leader :: node(),
   Nodes :: [node()].
