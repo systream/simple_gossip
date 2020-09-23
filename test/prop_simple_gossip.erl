@@ -41,6 +41,7 @@ prop_cluster() ->
     {term(), oneof(Nodes), oneof(Nodes)},
     begin
       rpc:call(Node, simple_gossip, set, [Payload]),
+      wait_until_cluster_reconcile(),
       Payload == rpc:call(GetNode, simple_gossip, get, [])
     end).
 
@@ -77,7 +78,6 @@ prop_cluster_kill_leader() ->
       Result = rpc:call(Node, simple_gossip, set, [Payload]),
       Result == ok andalso Payload == simple_gossip:get()
     end).
-
 
 wait_until_cluster_reconcile() ->
   wait_until_cluster_reconcile(10).

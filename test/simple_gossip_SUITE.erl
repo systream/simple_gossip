@@ -114,7 +114,9 @@ all() ->
     sync_between_nodes,
     sync_connecting_node,
     status,
-    status_timeout
+    status_timeout,
+    stop_node,
+    stop_leader_node
     %%status_mismatch
   ].
 
@@ -213,7 +215,7 @@ leave_by_another_node(_Config) ->
   simple_gossip:join(Node),
   wait_to_reconcile(),
   SelfNode = node(),
-  rpc:call(Node, simple_gossip, leave, [SelfNode]),
+  ok = rpc:call(Node, simple_gossip, leave, [SelfNode]),
   wait_to_reconcile(),
   ?assertMatch({ok, _, SelfNode, [SelfNode]}, simple_gossip:status()),
   simple_gossip:leave(Node),
@@ -232,13 +234,13 @@ sync_between_nodes(_Config) ->
   ?assertEqual("main", rpc:call(Node1, simple_gossip, get, [])),
   ?assertEqual("main", rpc:call(Node2, simple_gossip, get, [])),
 
-  rpc:call(Node1, simple_gossip, set, ["main1"]),
+  ok = rpc:call(Node1, simple_gossip, set, ["main1"]),
   wait_to_reconcile(),
 
   ?assertEqual("main1", simple_gossip:get()),
   ?assertEqual("main1", rpc:call(Node2, simple_gossip, get, [])),
 
-  rpc:call(Node2, simple_gossip, set, ["main2"]),
+  ok = rpc:call(Node2, simple_gossip, set, ["main2"]),
   wait_to_reconcile(),
 
   ?assertEqual("main2", simple_gossip:get()),
@@ -269,6 +271,35 @@ status_timeout(_Config) ->
   ?assertMatch({error, {timeout, [Node]}}, simple_gossip:status()),
   simple_gossip:leave(Node).
 
+stop_node(_Config) ->
+  simple_gossip:set("default"),
+  Node1 = start_slave_node('stop_1'),
+  simple_gossip:join(Node1),
+  wait_to_reconcile(),
+  simple_gossip:set(test),
+  Node = node(),
+  ct_slave:stop(Node1),
+  timer:sleep(10),
+  simple_gossip:leave(Node1),
+  wait_to_reconcile(),
+  ?assertMatch({ok, _, Node, _}, simple_gossip:status()).
+
+
+stop_leader_node(_Config) ->
+  simple_gossip:set("default"),
+  Node1 = start_slave_node('stop_2'),
+  simple_gossip:join(Node1),
+  wait_to_reconcile(),
+  simple_gossip:set(test),
+  Node = node(),
+
+  application:stop(simple_gossip),
+  timer:sleep(100),
+  ok = rpc:call(Node1, simple_gossip, leave, [Node]),
+  timer:sleep(100),
+  ?assertMatch({ok, _, Node1, _}, rpc:call(Node1, simple_gossip, status, [])),
+  ct_slave:stop(Node1).
+
 
 %%status_mismatch(_Config) ->
 %%  simple_gossip:set("default"),
@@ -278,7 +309,7 @@ status_timeout(_Config) ->
 
 %%  Rumor = {rumor, 1000, tweaked_data, Node, [Node], 8, 10000},
 
-%%  gen_server:cast({simple_gossip_server, Node}, {reconcile, Rumor}),
+%%  gen_server:cast({simple_gossip_server, Node}, {reconcile, Rumor, node()}),
 %%  ct:sleep(10),
 
 %%  ?assertMatch({error, mismatch}, simple_gossip:status()),
@@ -290,7 +321,7 @@ sync_connecting_node(_Config) ->
   simple_gossip:set("default"),
   Node1 = start_slave_node('sync_1'),
 
-  rpc:call(Node1, simple_gossip, join, [node()]),
+  ok = rpc:call(Node1, simple_gossip, join, [node()]),
 
   ?assertEqual("default", simple_gossip:get()),
 
