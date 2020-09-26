@@ -38,7 +38,7 @@ prop_cluster() ->
   ok = wait_until_cluster_reconcile(),
 
   ?FORALL({Payload, Node, GetNode},
-    {term(), oneof(Nodes), oneof(Nodes)},
+    {resize(500, term()), oneof(Nodes), oneof(Nodes)},
     begin
       rpc:call(Node, simple_gossip, set, [Payload]),
       wait_until_cluster_reconcile(),

@@ -366,17 +366,20 @@ receive_notify(Ref) ->
 
 
 wait_to_reconcile() ->
+  wait_to_reconcile(node(), 1400).
+
+wait_to_reconcile(Node, Timeout) ->
   Master = self(),
   Pid =
     spawn(fun F() ->
                     timer:sleep(10),
-                    case simple_gossip:status() of
-                       mismatch ->
+                    case rpc:call(Node, simple_gossip, status, []) of
+                      {error, mismatch} ->
                          F();
                        Result ->
                          Master ! {self(), Result}
                      end
           end),
-  R = receive {Pid, Result} -> Result after 1400 -> timeout end,
+  R = receive {Pid, Result} -> Result after Timeout -> timeout end,
   exit(Pid, kill),
   R.
