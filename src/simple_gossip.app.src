@@ -1,6 +1,6 @@
 {application, simple_gossip,
  [{description, "Simple gossip"},
-  {vsn, "0.1.0"},
+  {vsn, git},
   {registered, []},
   {mod, {simple_gossip_app, []}},
   {applications,
