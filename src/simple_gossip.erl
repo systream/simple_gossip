@@ -11,6 +11,10 @@
 %% API
 -export([set/1, get/0, join/1, leave/1, status/0, subscribe/1, unsubscribe/1]).
 
+-type set_fun() ::  fun((term()) -> {change, term()} | no_change).
+
+-export_type([set_fun/0]).
+
 %% @doc Set new rumor
 -spec set(Status | fun((Status) -> {change, Status} | no_change)) -> ok when
   Status :: term().
