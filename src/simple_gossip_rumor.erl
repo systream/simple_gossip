@@ -12,10 +12,8 @@
 
 %% API
 -export([new/0,
-
          increase_version/1,
          add_node/2,
-         promote_random_leader/1,
          change_leader/1,
          remove_node/2,
          pick_random_nodes/2,
@@ -50,8 +48,7 @@ set_data(Rumor, Data) ->
 remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   if_member(Rumor, Node,
             fun() ->
-              NewNodes = lists:delete(Node, Nodes),
-              NewRumor = Rumor#rumor{nodes = NewNodes},
+              NewRumor = Rumor#rumor{nodes = lists:delete(Node, Nodes)},
               if_leader(NewRumor, Node, fun promote_random_leader/1)
             end).
 
@@ -81,7 +78,7 @@ promote_random_leader(Rumor) ->
 -spec change_leader(rumor()) -> rumor().
 change_leader(#rumor{leader = Leader, nodes = Nodes} = Rumor) ->
   NewRumor = Rumor#rumor{nodes = lists:delete(Leader, Nodes)},
-  simple_gossip_rumor:promote_random_leader(NewRumor).
+  promote_random_leader(NewRumor).
 
 -spec if_not_member(rumor(), node(), manage_node_fun()) -> rumor().
 if_not_member(Rumor, Node, Fun) ->

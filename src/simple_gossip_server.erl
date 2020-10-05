@@ -291,7 +291,7 @@ handle_info(tick, #state{rumor = Rumor} =State) ->
 handle_info({nodedown, Node},
             #state{rumor = #rumor{leader = Node} = Rumor} = State) ->
   % Panic: Leader node is down!
-  {noreply, State#state{rumor = simple_gossip_rumor:promote_random_leader(Rumor)}};
+  {noreply, State#state{rumor = simple_gossip_rumor:change_leader(Rumor)}};
 handle_info({nodedown, _}, State) ->
   {noreply, State};
 handle_info({'DOWN', _, process, Pid, _Reason},
@@ -401,11 +401,8 @@ proxy_call(Command, From, #state{rumor = #rumor{leader = Leader} = Rumor} = Stat
   when Leader =/= node() ->
     case catch gen_server:call({?MODULE, Leader}, Command) of
       {'EXIT', {{nodedown, Leader}, _}} ->
-        % It seems leader is unreachable elect this node as the leader
-        proxy_call(Command, From, State#state{rumor =
-                                              simple_gossip_rumor:change_leader(Rumor)});
+        proxy_call(Command, From, State#state{rumor = simple_gossip_rumor:change_leader(Rumor)});
       {'EXIT', {noproc, _}} ->
-        % It seems leader is unreachable elect this node as the leader
         proxy_call(Command, From, State#state{rumor = simple_gossip_rumor:change_leader(Rumor)});
       Else ->
         {reply, Else, State}
@@ -417,9 +414,7 @@ proxy_call(Command, From, State) ->
 join_node(Rumor, Node) ->
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
   net_kernel:connect_node(Node),
-  case catch gen_server:call({?MODULE, Node},
-                             {join_request, NewRumor},
-                             1000) of
+  case catch gen_server:call({?MODULE, Node}, {join_request, NewRumor}, 1000) of
     {upgrade, UpgradeRumor} ->
       UpgradeRumor;
     _ ->
