@@ -12,8 +12,8 @@
 %%% PROPERTIES %%%
 %%%%%%%%%%%%%%%%%%
 prop_test() ->
-  stop_cluster(nodes()),
-  init_netkernel(),
+  simple_gossip_test_tools:stop_cluster(),
+  simple_gossip_test_tools:init_netkernel(),
   application:ensure_all_started(simple_gossip),
   SupChildren = supervisor:which_children(simple_gossip_sup),
   {_, ServerPid, _, _} = lists:keyfind(simple_gossip_server, 1, SupChildren),
@@ -45,7 +45,7 @@ cm({M, F, Args}) ->
 %%%%%%%%%%%%%
 %% @doc Initial model value at system start. Should be deterministic.
 initial_state() ->
-  Nodes = start_nodes(['g1', 'g2', 'g3', 'g4', 'g5']),
+  Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3', 'g4', 'g5']),
 
   [simple_gossip:join(Node) || Node <- Nodes],
 
@@ -73,7 +73,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
 %% @doc Determines whether a command should be valid under the
 %% current state.
 precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
-  simple_gossip_SUITE:wait_to_reconcile(Node, 200),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 200),
   true;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
@@ -142,20 +142,6 @@ next_state(#{subscribers := Subscribers} = State, Pid,
 next_state(State, _Res, {call, _Mod, _Fun, _Args}) ->
   State.
 
-init_netkernel() ->
-  case net_kernel:start([proper, shortnames]) of
-    {error, {already_started, _}} ->
-      ok;
-    {ok, _} ->
-      application:stop(simple_gossip),
-      application:ensure_all_started(simple_gossip)
-  end.
-
-start_nodes(NodeNames) ->
-  NodeList =
-    [simple_gossip_SUITE:start_slave_node(NodeName) || NodeName <- NodeNames],
-  NodeList ++ [node()].
-
 
 subscribe_on_node(Node) ->
   Pid = spawn(fun() -> subscribe_loop(undefined) end),
@@ -169,11 +155,3 @@ subscribe_loop(Data) ->
     {get_data, Ref, Pid} ->
       Pid ! {data, Ref, Data}
   end.
-
-stop_cluster([]) ->
-  ok;
-stop_cluster([Node | Nodes]) when Node =/= node() ->
-  ct_slave:stop(Node),
-  stop_cluster(Nodes);
-stop_cluster([Node | Nodes]) when Node =:= node() ->
-  stop_cluster(Nodes).

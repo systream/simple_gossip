@@ -11,6 +11,8 @@
 -include_lib("proper/include/proper.hrl").
 
 prop_set_get() ->
+  simple_gossip_test_tools:stop_cluster(),
+  simple_gossip_test_tools:init_netkernel(),
   application:ensure_all_started(simple_gossip),
   ?FORALL(Payload,
           term(),
@@ -20,7 +22,6 @@ prop_set_get() ->
           end).
 
 prop_set_get_with_fun() ->
-
   application:ensure_all_started(simple_gossip),
   ?FORALL(Payload,
     term(),
@@ -35,13 +36,13 @@ prop_cluster() ->
   application:ensure_all_started(simple_gossip),
 
   [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
-  ok = wait_until_cluster_reconcile(),
+  ok = simple_gossip_test_tools:wait_to_reconcile(),
 
   ?FORALL({Payload, Node, GetNode},
     {resize(500, term()), oneof(Nodes), oneof(Nodes)},
     begin
       rpc:call(Node, simple_gossip, set, [Payload]),
-      wait_until_cluster_reconcile(),
+      simple_gossip_test_tools:wait_to_reconcile(),
       Payload == rpc:call(GetNode, simple_gossip, get, [])
     end).
 
@@ -79,33 +80,5 @@ prop_cluster_kill_leader() ->
       Result == ok andalso Payload == simple_gossip:get()
     end).
 
-wait_until_cluster_reconcile() ->
-  wait_until_cluster_reconcile(10).
-
-wait_until_cluster_reconcile(N) ->
-  case simple_gossip:status() of
-    {ok, _, _, _} ->
-      ok;
-    Else when N == 0 ->
-      Else;
-    _ ->
-      timer:sleep(10),
-      wait_until_cluster_reconcile(N- 1)
-  end.
-
 start_cluster() ->
-  start_cluster(['prop1', 'prop2', 'prop3', 'prop4']).
-
-start_cluster(NodeNames) ->
-  case net_kernel:start([proper, shortnames]) of
-    {error, {already_started, _}} ->
-      ok;
-    {ok, _} ->
-      application:stop(simple_gossip),
-      application:ensure_all_started(simple_gossip)
-  end,
-
-  NodeList =
-    [simple_gossip_SUITE:start_slave_node(NodeName) || NodeName <- NodeNames],
-
-  NodeList ++ [node()].
+  simple_gossip_test_tools:start_nodes(['prop1', 'prop2', 'prop3', 'prop4']).
