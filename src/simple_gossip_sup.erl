@@ -21,11 +21,16 @@ start_link() ->
   {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}} | ignore.
 init([]) ->
     SupFlags = #{strategy => one_for_one, intensity => 3, period => 10},
-    Server =
-        #{id => simple_gossip_server,
-          start => {simple_gossip_server, start_link, []},
-          restart => permanent,
-          shutdown => 5000,
-          modules => [simple_gossip_server]},
-    ChildSpecs = [Server],
+    EventServer = #{id => simple_gossip_event,
+                    start => {gen_event, start_link, [{local, simple_gossip_event}]},
+                    restart => permanent,
+                    shutdown => 5000,
+                    modules => [simple_gossip_event]},
+    Service = #{id => simple_gossip_server,
+                start => {simple_gossip_server, start_link, []},
+                restart => permanent,
+                shutdown => 5000,
+                modules => [simple_gossip_server]},
+
+    ChildSpecs = [EventServer, Service],
     {ok, {SupFlags, ChildSpecs}}.

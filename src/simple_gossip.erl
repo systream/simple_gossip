@@ -29,12 +29,12 @@ get() ->
 %% @doc Subscribe to rumor changes
 -spec subscribe(pid()) -> ok.
 subscribe(Pid) ->
-  simple_gossip_server:subscribe(Pid).
+  simple_gossip_notify:subscribe(Pid).
 
 %% @doc Unsubscribe from rumor changes
 -spec unsubscribe(pid()) -> ok.
 unsubscribe(Pid) ->
-  simple_gossip_server:unsubscribe(Pid).
+  simple_gossip_notify:unsubscribe(Pid).
 
 %% @doc Join node to cluster
 -spec join(node()) -> ok.

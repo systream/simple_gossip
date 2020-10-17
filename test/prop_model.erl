@@ -60,9 +60,9 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
   RpcNode = oneof(InCluster),
   OneOfSubscribers = oneof([skip | Subscribers]),
     frequency([
-      {15, ?RPC(RpcNode, set, [resize(150, term())])},
-      {25, ?RPC(RpcNode, get, [])},
-      {13, ?RPC(RandomNode, join, [RandomNode])},
+      {10, ?RPC(RpcNode, set, [resize(150, term())])},
+      {15, ?RPC(RpcNode, get, [])},
+      {10, ?RPC(RandomNode, join, [RandomNode])},
       {10, ?RPC(RandomNode, leave, [RandomNode])},
 
       {5, {call, ?MODULE, subscribe_on_node, [RandomNode]}},

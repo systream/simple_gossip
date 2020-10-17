@@ -21,10 +21,7 @@
          set/1,
          get/0,
 
-         status/0,
-
-         subscribe/1,
-         unsubscribe/1]).
+         status/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -39,7 +36,6 @@
 -define(RUMOR(State), State#state.rumor).
 
 -record(state, {rumor = #rumor{} :: rumor(),
-                subscribers = #{} :: #{pid() := reference()},
                 rumor_record_version = 1 :: pos_integer()
 }).
 
@@ -57,14 +53,6 @@ set(Data) ->
 -spec get() -> term().
 get() ->
   gen_server:call(?SERVER, get).
-
--spec subscribe(pid()) -> ok.
-subscribe(Pid) ->
-  gen_server:call(?SERVER, {subscribe, Pid}).
-
--spec unsubscribe(pid()) -> ok.
-unsubscribe(Pid) ->
-  gen_server:call(?SERVER, {unsubscribe, Pid}).
 
 -spec join(node()) -> ok.
 join(Node) ->
@@ -112,6 +100,8 @@ start_link() ->
   {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  gen_event:add_handler(simple_gossip_event, simple_gossip_notify, []),
+  %gen_event:add_handler(simple_gossip_event, simple_gossip_throttle, []),
   Rumor = simple_gossip_rumor:new(),
   State = #state{rumor = Rumor},
   schedule_gossip(Rumor),
@@ -136,23 +126,6 @@ handle_call(get, _From, #state{rumor = #rumor{data = Data}} = State) ->
   {reply, Data, State};
 handle_call({set, Data}, From, State) ->
   proxy_call({set, Data}, From, State);
-handle_call({subscribe, Pid}, _From, #state{subscribers = Subscribers} = State) ->
-  case maps:get(Pid, Subscribers, not_found) of
-    not_found ->
-      Ref = monitor(process, Pid),
-      {reply, ok, State#state{subscribers = Subscribers#{Pid => Ref}}};
-    _ ->
-      {reply, ok, State}
-  end;
-handle_call({unsubscribe, Pid}, _From, #state{subscribers = Subscribers} = State) ->
-  case maps:get(Pid, Subscribers, not_found) of
-    not_found ->
-      {reply, ok, State};
-    Ref ->
-      demonitor(Ref, [flush]),
-      {reply, ok, State#state{subscribers = maps:remove(Pid, Subscribers)}}
-  end;
-
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
                                                 gossip_version = Version,
                                                 leader = Leader}} = State) ->
@@ -199,7 +172,7 @@ handle_command({set, ChangeFun}, _From, #state{rumor = #rumor{data = Data} = Rum
     {change, NewData} ->
       NewRumor = simple_gossip_rumor:set_data(Rumor, NewData),
       gossip(NewRumor),
-      notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
+      notify_subscribers(NewRumor),
       {reply, ok, State#state{rumor = NewRumor}};
     no_change ->
       {reply, ok, State}
@@ -207,7 +180,7 @@ handle_command({set, ChangeFun}, _From, #state{rumor = #rumor{data = Data} = Rum
 handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = simple_gossip_rumor:set_data(Rumor, Data),
   gossip(NewRumor),
-  notify_subscribers(Rumor, NewRumor, maps:keys(State#state.subscribers)),
+  notify_subscribers(NewRumor),
   {reply, ok, State#state{rumor = NewRumor}};
 
 handle_command({join, Node}, _From, #state{rumor = Rumor} = State) ->
@@ -224,7 +197,7 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   when Node == node() ->
   gossip(simple_gossip_rumor:remove_node(Rumor, Node)),
   MyRumor = simple_gossip_rumor:new(),
-  notify_subscribers(State#state.rumor, MyRumor, maps:keys(State#state.subscribers)),
+  notify_subscribers(MyRumor),
   {reply, ok, State#state{rumor = MyRumor}};
 
 handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumor} = State)
@@ -260,7 +233,7 @@ handle_cast({reconcile,
   NewRumor = check_leader_change(CRumor, simple_gossip_rumor:check_node_exclude(InRumor)),
   GossipNodes = lists:delete(SenderNode, lists:delete(node(), NewRumor#rumor.nodes)),
   gossip(NewRumor, GossipNodes),
-  notify_subscribers(CRumor, NewRumor, maps:keys(State#state.subscribers)),
+  notify_subscribers(NewRumor),
   {noreply, State#state{rumor = NewRumor}};
 handle_cast({reconcile, _Rumor, _SenderNode}, State) ->
   {noreply, State};
@@ -293,10 +266,7 @@ handle_info({nodedown, Node},
   % Panic: Leader node is down!
   {noreply, State#state{rumor = simple_gossip_rumor:change_leader(Rumor)}};
 handle_info({nodedown, _}, State) ->
-  {noreply, State};
-handle_info({'DOWN', _, process, Pid, _Reason},
-            State = #state{subscribers = Subscribers}) ->
-  {noreply, State#state{subscribers = maps:remove(Pid, Subscribers)}}.
+  {noreply, State}.
 
 
 %%--------------------------------------------------------------------
@@ -388,15 +358,6 @@ check_leader_change(#rumor{leader = OldLeader},
   erlang:monitor_node(OldLeader, false),
   NewRumor.
 
--spec notify_subscribers(Current :: rumor(), New :: rumor(), [pid()]) -> ok.
-notify_subscribers(_, _, []) ->
-  ok;
-notify_subscribers(#rumor{data = Data}, #rumor{data = Data}, _) ->
-  ok;
-notify_subscribers(#rumor{data = _}, #rumor{data = NewData}, Subscribers) ->
-  [ Pid ! {data_changed, NewData} || Pid <- Subscribers],
-  ok.
-
 proxy_call(Command, From, #state{rumor = #rumor{leader = Leader} = Rumor} = State)
   when Leader =/= node() ->
     case catch gen_server:call({?MODULE, Leader}, Command) of
@@ -420,3 +381,7 @@ join_node(Rumor, Node) ->
     _ ->
       NewRumor
   end.
+
+-spec notify_subscribers(rumor()) -> ok.
+notify_subscribers(Rumor) ->
+  gen_event:notify(simple_gossip_event, {reconcile, Rumor}).
