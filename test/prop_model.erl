@@ -1,5 +1,6 @@
 -module(prop_model).
 -include_lib("proper/include/proper.hrl").
+-include("../src/simple_gossip.hrl").
 
 %% Model Callbacks
 -export([command/1, initial_state/0, next_state/3,
@@ -11,22 +12,28 @@
 %%%%%%%%%%%%%%%%%%
 %%% PROPERTIES %%%
 %%%%%%%%%%%%%%%%%%
+
+f() ->
+  receive
+    {out, Format, Args} ->
+      io:format(user, Format, Args),
+      f()
+  end.
+
 prop_test() ->
+  OutServer = spawn(fun f/0),
+  put(debug_pid, OutServer),
   simple_gossip_test_tools:stop_cluster(),
   simple_gossip_test_tools:init_netkernel(),
   application:ensure_all_started(simple_gossip),
-  SupChildren = supervisor:which_children(simple_gossip_sup),
-  {_, ServerPid, _, _} = lists:keyfind(simple_gossip_server, 1, SupChildren),
-  % restart the server to loose it's state
-  exit(ServerPid, kill),
-    ?FORALL(Cmds, commands(?MODULE),
-            begin
-                simple_gossip:set(1),
-                {History, State, Result} = run_commands(?MODULE, Cmds),
-                ?WHENFAIL(io:format("History: ~p\nState: ~p\nResult: ~p\n",
-                                    [History,State,Result]),
-                          aggregate(cmd_names(Cmds), Result =:= ok))
-            end).
+  ?FORALL(Cmds, commands(?MODULE),
+          begin
+              simple_gossip:set(1),
+              {History, State, Result} = run_commands(?MODULE, Cmds),
+              ?WHENFAIL(io:format("History: ~p\nState: ~p\nResult: ~p\n",
+                                  [History,State,Result]),
+                        aggregate(cmd_names(Cmds), Result =:= ok))
+          end).
 
 
 cmd_names({Cmds, L}) ->
@@ -48,6 +55,9 @@ initial_state() ->
   Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3', 'g4', 'g5']),
 
   [simple_gossip:join(Node) || Node <- Nodes],
+
+  DebugPid = get(debug_pid),
+  [rpc:call(Node, simple_gossip_server, set_debug, [DebugPid]) || Node <- Nodes],
 
   #{nodes => Nodes,
     data => 1,
@@ -100,11 +110,13 @@ postcondition(_State, {call, _Mod, _Fun, [_Node, _, set, [_Data]]}, Res) ->
   Res == ok;
 postcondition(_, {call, rpc, call, [_, _, get, []]}, undefined) ->
   true;
-postcondition(#{data := Data},
+postcondition(#{data := Data, in_cluster := ClusterNodes},
               {call, rpc, call, [_Node, _, get, []]}, Res) ->
   case Data /= Res of
     true ->
-      io:format("Mismatch: ~p - ~p ~n States: ~n", [Data, Res]),
+      dump_server_states(ClusterNodes),
+      io:format("Different data -~n OnNode: ~p~n In cluster: ~p~n Expected data hash: ~p~n Got Data hash: ~p~n",
+                [_Node, ClusterNodes, erlang:phash2(Data, 9999), erlang:phash2(Res, 9999)]),
       ok;
     _ ->
       ok
@@ -140,8 +152,8 @@ next_state(#{subscribers := Subscribers} = State, Pid,
   State#{subscribers => [Pid | Subscribers]};
 
 next_state(State, _Res, {call, _Mod, _Fun, _Args}) ->
+  %io:format("Not handled commands: ~p~n", [{call, _Mod, _Fun, _Args}]),
   State.
-
 
 subscribe_on_node(Node) ->
   Pid = spawn(fun() -> subscribe_loop(undefined) end),
@@ -155,3 +167,17 @@ subscribe_loop(Data) ->
     {get_data, Ref, Pid} ->
       Pid ! {data, Ref, Data}
   end.
+
+dump_server_states(Nodes) ->
+  {Pids, []} = rpc:multicall(Nodes, erlang, whereis, [simple_gossip_server]),
+  [format_server_state(Pid) || Pid <- Pids].
+
+format_server_state(Pid) ->
+  {state, Rumor, _} = sys:get_state(Pid),
+  io:format("~n============================================================~n"),
+  io:format("Node:        ~p~n", [node(Pid)]),
+  io:format("Leader:      ~p~n", [Rumor#rumor.leader]),
+  io:format("GossipVsn:   ~p~n", [Rumor#rumor.gossip_version]),
+  io:format("Datahash:    ~p~n", [erlang:phash2(Rumor#rumor.data, 9999)]),
+  io:format("VectorClock: ~p~n", [Rumor#rumor.vector_clock]),
+  io:format("Nodes:       ~p~n", [Rumor#rumor.nodes]).
