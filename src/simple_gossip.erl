@@ -29,12 +29,12 @@ get() ->
 %% @doc Subscribe to rumor changes
 -spec subscribe(pid()) -> ok.
 subscribe(Pid) ->
-  simple_gossip_notify:subscribe(Pid).
+  simple_gossip_event:subscribe(Pid).
 
 %% @doc Unsubscribe from rumor changes
 -spec unsubscribe(pid()) -> ok.
 unsubscribe(Pid) ->
-  simple_gossip_notify:unsubscribe(Pid).
+  simple_gossip_event:unsubscribe(Pid).
 
 %% @doc Join node to cluster
 -spec join(node()) -> ok.
@@ -47,8 +47,8 @@ leave(Node) ->
   simple_gossip_server:leave(Node).
 
 %% @doc Check cluster status
--spec status() ->
-  {ok, Vsn, Leader, Nodes} | {error, {timeout, Nodes} | mismatch} when
+-spec status() -> {ok, Vsn, Leader, Nodes} |
+                  {error, {timeout, Nodes} | mismatch, Leader, Nodes} when
   Vsn :: pos_integer(),
   Leader :: node(),
   Nodes :: [node()].

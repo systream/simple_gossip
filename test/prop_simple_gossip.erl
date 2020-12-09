@@ -35,6 +35,7 @@ prop_cluster() ->
   [Node1 | _] = Nodes = start_cluster(),
   application:ensure_all_started(simple_gossip),
 
+  [simple_gossip_test_tools:clear_gossip_persistent_data(Node) || Node <- Nodes],
   [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
   ok = simple_gossip_test_tools:wait_to_reconcile(),
 
@@ -49,6 +50,7 @@ prop_cluster() ->
 prop_cluster_stop_leader() ->
   [Node1 | _] = Nodes = start_cluster(),
 
+  [simple_gossip_test_tools:clear_gossip_persistent_data(Node) || Node <- Nodes],
   [rpc:call(Node1, simple_gossip, join, [Node]) || Node <- Nodes],
 
   % kill the leader,

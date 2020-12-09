@@ -268,7 +268,9 @@ status_timeout(_Config) ->
   simple_gossip:set("default"),
   Node = 'test_no_node@local',
   simple_gossip:join(Node),
-  ?assertMatch({error, {timeout, [Node]}}, simple_gossip:status()),
+  CurrentNode = node(),
+  ?assertMatch({error, {timeout, [Node]}, CurrentNode, [Node, CurrentNode]},
+               simple_gossip:status()),
   simple_gossip:leave(Node).
 
 stop_node(_Config) ->

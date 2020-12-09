@@ -8,11 +8,11 @@
 -module(simple_gossip_rumor).
 -author("Peter Tihanyi").
 
--include_lib("simple_gossip.hrl").
+-include("simple_gossip.hrl").
 
 %% API
 -export([new/0,
-         increase_version/1,
+         new/1,
          add_node/2,
          change_leader/1,
          remove_node/2,
@@ -20,11 +20,11 @@
          check_node_exclude/1,
          if_member/3,
          if_not_member/3,
-         set_data/2]).
+         set_data/2,
+         check_vector_clocks/2]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
-
 
 -spec new() -> rumor().
 new() ->
@@ -32,13 +32,34 @@ new() ->
          nodes = [node()],
          gossip_version = 1}.
 
--spec increase_version(rumor()) -> rumor().
-increase_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
+-spec new(rumor()) -> rumor().
+new(#rumor{vector_clock = VectorClocks}) ->
+  #rumor{leader = node(),
+         nodes = [node()],
+         gossip_version = 1,
+         vector_clock = VectorClocks}.
+
+-spec increase_gossip_version(rumor()) -> rumor().
+increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
   Rumor#rumor{gossip_version = GossipVersion+1}.
+
+-spec increase_vector_clock(rumor()) -> rumor().
+increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor) ->
+  Node = node(),
+  NewVectorClock = VectorClock#{Node => maps:get(node(), VectorClock, 0)+1},
+  Rumor#rumor{vector_clock = NewVectorClock}.
+
+-spec increase_version(rumor()) -> rumor().
+increase_version(Rumor) ->
+  increase_vector_clock(increase_gossip_version(Rumor)).
 
 -spec add_node(rumor(), node()) -> rumor().
 add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
-  if_not_member(Rumor, Node, fun() -> Rumor#rumor{nodes = [Node | Nodes]} end).
+  if_not_member(Rumor, Node,
+                fun() ->
+                  increase_version(Rumor#rumor{nodes = [Node | Nodes]})
+                end
+  ).
 
 -spec set_data(rumor(), term()) -> rumor().
 set_data(Rumor, Data) ->
@@ -48,13 +69,15 @@ set_data(Rumor, Data) ->
 remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   if_member(Rumor, Node,
             fun() ->
-              NewRumor = Rumor#rumor{nodes = lists:delete(Node, Nodes)},
+              NewRumor = increase_version(
+                Rumor#rumor{nodes = lists:delete(Node, Nodes)}
+              ),
               if_leader(NewRumor, Node, fun promote_random_leader/1)
             end).
 
 -spec check_node_exclude(rumor()) -> rumor().
 check_node_exclude(Rumor) ->
-  if_not_member(Rumor, node(), fun() -> new() end).
+  if_not_member(Rumor, node(), fun() -> increase_vector_clock(new(Rumor)) end).
 
 -spec pick_random_nodes([node()], non_neg_integer()) -> [node()].
 pick_random_nodes(Nodes, Number) ->
@@ -92,7 +115,7 @@ if_member(Rumor, Node, Fun) ->
 if_member(#rumor{nodes = Nodes} = Rumor, Node, Fun, Type) ->
   case lists:member(Node, Nodes) of
     Type ->
-      increase_version(Fun());
+      Fun();
     _ ->
       Rumor
   end.
@@ -103,3 +126,8 @@ if_leader(#rumor{leader = Leader} = Rumor, Leader, Fun) ->
 if_leader(Rumor, _, _Fun) ->
   Rumor.
 
+-spec check_vector_clocks(In :: rumor(), Current :: rumor()) -> boolean().
+check_vector_clocks(#rumor{vector_clock = InVectorClocks},
+                    #rumor{vector_clock = CurrentVectorClocks}) ->
+  Node = node(),
+  maps:get(Node, InVectorClocks, 0) >= maps:get(Node, CurrentVectorClocks, 0).

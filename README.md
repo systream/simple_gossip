@@ -32,10 +32,10 @@ simple_gossip:status().
 
 Result can be
 * `{ok, GossipVsn, LeaderNode, NodesInTheCluster}`
-* `{error, mismatch}`: Nodes do not agree on cluster state (different GossipVsn
-). Try again later
-* `{error, {timeout, NodesDoNotResponseInTime}}`: Cannot retrieve information from
- cluster nodes in time
+* `{error, mismatch, LeaderNode, NodesInTheCluster}`:
+ Nodes do not agree on cluster state (different GossipVsn). Try again later
+* `{error, {timeout, NodesDoNotResponseInTime}, LeaderNode, NodesInTheCluster}`: 
+Cannot retrieve information from cluster nodes in time
 
 ### Subscribe to cluster changes
 ```erlang
