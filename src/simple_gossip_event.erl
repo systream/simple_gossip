@@ -181,7 +181,7 @@ handle_notify(Rumor, #state{rumor_hash = Rh, data_hash = Dh} = State) ->
 
   case {IsDataChanged, IsRumorChanged} of
     {true, _} ->
-      %% notify every body
+      %% notify everybody
       maps:map(fun(Pid, {data, _}) ->
                     Pid ! {data_changed, Data};
                   (Pid, {rumor, _}) ->
@@ -202,10 +202,8 @@ handle_notify(Rumor, #state{rumor_hash = Rh, data_hash = Dh} = State) ->
   end,
   NewState.
 
-
 -spec set_mode(async | sync) -> ok.
 set_mode(Mode) when Mode == async orelse Mode == sync ->
-  io:format("set mode: ~p~n", [Mode]),
   persistent_term:put({?SERVER, mode}, Mode).
 
 -spec get_mode() -> sync | async.
@@ -216,7 +214,6 @@ get_mode() ->
 check_mode() ->
   {message_queue_len, MsgQueueLen} =
     erlang:process_info(self(), message_queue_len),
-  %io:format("msg queue len: ~p~n", [MsgQueueLen]),
   case get_mode() of
     async when MsgQueueLen > 3 ->
       set_mode(sync);

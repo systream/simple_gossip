@@ -21,7 +21,9 @@
          if_member/3,
          if_not_member/3,
          set_data/2,
-         check_vector_clocks/2]).
+         check_vector_clocks/2,
+         change_gossip_period/2,
+         calculate_new_leader/1]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
@@ -39,19 +41,26 @@ new(#rumor{vector_clock = VectorClocks}) ->
          gossip_version = 1,
          vector_clock = VectorClocks}.
 
+-spec change_gossip_period(rumor(), pos_integer()) -> rumor().
+change_gossip_period(#rumor{} = Rumor, Period) ->
+  Rumor#rumor{max_gossip_per_period = Period}.
+
 -spec increase_gossip_version(rumor()) -> rumor().
 increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
   Rumor#rumor{gossip_version = GossipVersion+1}.
 
--spec increase_vector_clock(rumor()) -> rumor().
-increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor) ->
-  Node = node(),
+-spec increase_vector_clock(rumor(), node()) -> rumor().
+increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor, Node) ->
   NewVectorClock = VectorClock#{Node => maps:get(node(), VectorClock, 0)+1},
   Rumor#rumor{vector_clock = NewVectorClock}.
 
 -spec increase_version(rumor()) -> rumor().
 increase_version(Rumor) ->
-  increase_vector_clock(increase_gossip_version(Rumor)).
+  increase_version(Rumor, node()).
+
+-spec increase_version(rumor(), node()) -> rumor().
+increase_version(#rumor{} = Rumor, Node) ->
+  increase_vector_clock(increase_gossip_version(Rumor), Node).
 
 -spec add_node(rumor(), node()) -> rumor().
 add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
@@ -62,7 +71,7 @@ add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   ).
 
 -spec set_data(rumor(), term()) -> rumor().
-set_data(Rumor, Data) ->
+set_data(#rumor{} = Rumor, Data) ->
   increase_version(Rumor#rumor{data = Data}).
 
 -spec remove_node(rumor(), node()) -> rumor().
@@ -72,12 +81,15 @@ remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
               NewRumor = increase_version(
                 Rumor#rumor{nodes = lists:delete(Node, Nodes)}
               ),
-              if_leader(NewRumor, Node, fun promote_random_leader/1)
+              if_leader(NewRumor, Node, fun change_leader/1)
             end).
 
 -spec check_node_exclude(rumor()) -> rumor().
-check_node_exclude(Rumor) ->
-  if_not_member(Rumor, node(), fun() -> increase_vector_clock(new(Rumor)) end).
+check_node_exclude(#rumor{} = Rumor) ->
+  if_not_member(Rumor, node(),
+                fun() ->
+                  increase_vector_clock(new(Rumor), node())
+                end).
 
 -spec pick_random_nodes([node()], non_neg_integer()) -> [node()].
 pick_random_nodes(Nodes, Number) ->
@@ -90,18 +102,18 @@ pick_random_nodes(Nodes, Number, Acc) ->
   Node = lists:nth(rand:uniform(length(Nodes)), Nodes),
   pick_random_nodes(lists:delete(Node, Nodes), Number-1, [Node | Acc]).
 
--spec promote_random_leader(rumor()) -> rumor().
-promote_random_leader(#rumor{nodes = Nodes} = Rumor)
-  when Nodes =/= [] ->
-  NewLeader = lists:nth(erlang:phash(Rumor, length(Nodes)), Nodes),
+-spec change_leader(rumor()) -> rumor().
+change_leader(#rumor{nodes = Nodes, leader = Leader} = Rumor)
+  when Nodes =/= [] andalso Nodes =/= [Leader] ->
+  NewLeader = calculate_new_leader(Rumor),
   increase_version(Rumor#rumor{leader = NewLeader});
-promote_random_leader(Rumor) ->
+change_leader(Rumor) ->
   Rumor.
 
--spec change_leader(rumor()) -> rumor().
-change_leader(#rumor{leader = Leader, nodes = Nodes} = Rumor) ->
-  NewRumor = Rumor#rumor{nodes = lists:delete(Leader, Nodes)},
-  promote_random_leader(NewRumor).
+-spec calculate_new_leader(rumor()) -> node().
+calculate_new_leader(#rumor{nodes = Nodes, leader = Leader}) ->
+  [_ | _] = ONodes = lists:usort(Nodes -- [Leader]),
+  lists:nth(erlang:phash(ONodes, length(ONodes)), ONodes).
 
 -spec if_not_member(rumor(), node(), manage_node_fun()) -> rumor().
 if_not_member(Rumor, Node, Fun) ->

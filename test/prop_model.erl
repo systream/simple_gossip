@@ -13,25 +13,20 @@
 %%% PROPERTIES %%%
 %%%%%%%%%%%%%%%%%%
 
-f() ->
-  receive
-    {out, Format, Args} ->
-      io:format(user, Format, Args),
-      f()
-  end.
-
 prop_test() ->
-  OutServer = spawn(fun f/0),
-  put(debug_pid, OutServer),
-  simple_gossip_test_tools:stop_cluster(),
   simple_gossip_test_tools:init_netkernel(),
+  simple_gossip_test_tools:stop_cluster(),
+  application:stop(simple_gossip),
+  simple_gossip_persist:delete_file(),
   application:ensure_all_started(simple_gossip),
+  simple_gossip_test_tools:wait_to_reconcile(),
+  simple_gossip_server:set_gossip_period(2000),
   ?FORALL(Cmds, commands(?MODULE),
           begin
               simple_gossip:set(1),
               {History, State, Result} = run_commands(?MODULE, Cmds),
               ?WHENFAIL(io:format("History: ~p\nState: ~p\nResult: ~p\n",
-                                  [History,State,Result]),
+                                  [History, State, Result]),
                         aggregate(cmd_names(Cmds), Result =:= ok))
           end).
 
@@ -52,12 +47,8 @@ cm({M, F, Args}) ->
 %%%%%%%%%%%%%
 %% @doc Initial model value at system start. Should be deterministic.
 initial_state() ->
-  Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3', 'g4', 'g5']),
-
+  Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3']),
   [simple_gossip:join(Node) || Node <- Nodes],
-
-  DebugPid = get(debug_pid),
-  [rpc:call(Node, simple_gossip_server, set_debug, [DebugPid]) || Node <- Nodes],
 
   #{nodes => Nodes,
     data => 1,
@@ -87,9 +78,11 @@ precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
   true;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
-  lists:member(Node, ClusterNodes) orelse lists:member(ToNode, ClusterNodes);
+  Res = lists:member(Node, ClusterNodes) orelse lists:member(ToNode, ClusterNodes),
+  precondition_wait_to_reconcile(Res, Node);
 precondition(_, {call, rpc, call, [Node, _, leave, [FromNode]]}) ->
-  Node =/= FromNode;
+  Res = Node =/= FromNode,
+  precondition_wait_to_reconcile(Res, Node);
 
 precondition(_, {call, rpc, call, [_Node, _, unsubscribe, [skip]]}) ->
   false;
@@ -127,16 +120,21 @@ postcondition(_State, {call, _Mod, _Fun, _Args} = _A, _Res) ->
 
 %% @doc Assuming the postcondition for a call was true, update the model
 %% accordingly for the test to proceed.
-next_state(State, _Res,
-           {call, rpc, call, [_Node, _, set, [SetData]] = _Args}) ->
-  State#{data => SetData};
+next_state(#{in_cluster := ClusterNodes} = State, _Res,
+           {call, rpc, call, [Node, _, set, [SetData]] = _Args}) ->
+  case lists:member(Node, ClusterNodes) of
+    true ->
+      State#{data => SetData};
+    _ ->
+      State
+  end;
 next_state(#{in_cluster := ClusterNodes} = State, _Res,
            {call, rpc, call, [FromNode, _, join, [ToNode]] = _Args}) ->
   case {lists:member(FromNode, ClusterNodes), lists:member(ToNode, ClusterNodes)} of
     {false, false} ->
       State;
     _ ->
-      State#{in_cluster => lists:usort([ FromNode, ToNode | ClusterNodes])}
+      State#{in_cluster => lists:usort([FromNode, ToNode | ClusterNodes])}
   end;
 next_state(#{in_cluster := ClusterNodes} = State, _Res,
            {call, rpc, call, [FromNode, _, leave, [ToNode]] = _Args}) ->
@@ -156,14 +154,19 @@ next_state(State, _Res, {call, _Mod, _Fun, _Args}) ->
   State.
 
 subscribe_on_node(Node) ->
-  Pid = spawn(fun() -> subscribe_loop(undefined) end),
+  Pid = spawn(fun() -> subscribe_loop() end),
   ok = rpc:call(Node, simple_gossip, subscribe, [Pid]),
   Pid.
 
-subscribe_loop(Data) ->
+subscribe_loop() ->
+  subscribe_loop(undefined, rand:uniform(1000)).
+
+subscribe_loop(_, 0) ->
+  ok;
+subscribe_loop(Data, MaxIteration) ->
   receive
-    {data_changed, Data} ->
-      subscribe_loop(Data);
+    {data_changed, NewData} ->
+      subscribe_loop(NewData, MaxIteration-1);
     {get_data, Ref, Pid} ->
       Pid ! {data, Ref, Data}
   end.
@@ -173,7 +176,7 @@ dump_server_states(Nodes) ->
   [format_server_state(Pid) || Pid <- Pids].
 
 format_server_state(Pid) ->
-  {state, Rumor, _} = sys:get_state(Pid),
+  {state, Rumor, _, _} = sys:get_state(Pid),
   io:format("~n============================================================~n"),
   io:format("Node:        ~p~n", [node(Pid)]),
   io:format("Leader:      ~p~n", [Rumor#rumor.leader]),
@@ -181,3 +184,9 @@ format_server_state(Pid) ->
   io:format("Datahash:    ~p~n", [erlang:phash2(Rumor#rumor.data, 9999)]),
   io:format("VectorClock: ~p~n", [Rumor#rumor.vector_clock]),
   io:format("Nodes:       ~p~n", [Rumor#rumor.nodes]).
+
+precondition_wait_to_reconcile(true, Node) ->
+  simple_gossip_test_tools:wait_to_reconcile(Node, 10),
+  true;
+precondition_wait_to_reconcile(false, _Node) ->
+  false.
