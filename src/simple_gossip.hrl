@@ -13,7 +13,7 @@
                 data :: any(),
                 leader :: node(),
                 nodes = [] :: [node()],
-                max_gossip_per_period = 8 :: pos_integer(),
+                max_gossip_per_period = 3 :: pos_integer(),
                 gossip_period = 10000 :: pos_integer()
 }).
 

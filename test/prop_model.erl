@@ -74,7 +74,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
 %% @doc Determines whether a command should be valid under the
 %% current state.
 precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 200),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 100),
   true;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
@@ -150,7 +150,7 @@ next_state(#{subscribers := Subscribers} = State, Pid,
   State#{subscribers => [Pid | Subscribers]};
 
 next_state(State, _Res, {call, _Mod, _Fun, _Args}) ->
-  %io:format("Not handled commands: ~p~n", [{call, _Mod, _Fun, _Args}]),
+  %io:format("Not handled command: ~p~n", [{call, _Mod, _Fun, _Args}]),
   State.
 
 subscribe_on_node(Node) ->

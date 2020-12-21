@@ -214,6 +214,7 @@ handle_command({join, Node}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = simple_gossip_rumor:if_not_member(Rumor, Node,
                                                fun() -> join_node(Rumor, Node) end),
   gossip(NewRumor),
+  simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
 handle_command({leave, Node}, _From,
@@ -236,6 +237,7 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   ?LOG_INFO("Node ~p leaving. Leader: ~p~n", [Node, Node]),
   NewRumor = simple_gossip_rumor:remove_node(Rumor, Node),
   gossip(NewRumor),
+  simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
 handle_command({leave, Node}, _From,
@@ -244,7 +246,10 @@ handle_command({leave, Node}, _From,
                           [Node, State#state.rumor#rumor.leader]),
   NewRumor = simple_gossip_rumor:remove_node(Rumor, Node),
   simple_gossip_rumor:if_member(Rumor, Node,
-                                fun() -> gossip(NewRumor, Node), NewRumor end),
+                                fun() -> gossip(NewRumor, Node),
+                                         simple_gossip_event:notify(NewRumor),
+                                         NewRumor
+                                end),
   gossip(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
@@ -252,9 +257,8 @@ handle_command({change_period, Period}, _From,
                #state{rumor = Rumor} = State) ->
   NewRumor = simple_gossip_rumor:change_gossip_period(Rumor, Period),
   gossip(NewRumor),
+  simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})}.
-
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -274,8 +278,7 @@ handle_cast({reconcile,
   when InVersion > Version ->
   case simple_gossip_rumor:check_vector_clocks(InRumor, CRumor) of
     true ->
-      NewRumor0 = simple_gossip_rumor:check_node_exclude(InRumor),
-      NewRumor1 = check_leader_change(CRumor, NewRumor0),
+      NewRumor1 = simple_gossip_rumor:check_node_exclude(InRumor),
       GossipNodes = lists:delete(SenderNode,
                                  lists:delete(node(), NewRumor1#rumor.nodes)),
       gossip(NewRumor1, GossipNodes),
@@ -313,15 +316,7 @@ handle_cast({get_gossip_version, Requester, Ref},
   {stop, Reason :: term(), NewState :: state()}).
 handle_info(tick, #state{rumor = Rumor} =State) ->
   gossip_random_node(Rumor),
-  {noreply, reschedule_gossip(State)};
-handle_info({nodedown, Node},
-            #state{rumor = #rumor{leader = Node} = Rumor} = State) ->
-  ?LOG_WARNING("Leader node is down ~p", [Node]),
-  {noreply, State#state{rumor = simple_gossip_rumor:change_leader(Rumor)}};
-handle_info({nodedown, _Node}, State) ->
-  ?LOG_WARNING("Node is down ~p", [_Node]),
-  {noreply, State}.
-
+  {noreply, reschedule_gossip(State)}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -371,7 +366,7 @@ gossip(Rumor, Node) ->
 
 -spec schedule_gossip(rumor()) -> reference().
 schedule_gossip(#rumor{gossip_period = Period}) ->
-  erlang:send_after(Period+rand:uniform(10), ?SERVER, tick).
+  erlang:send_after(Period+rand:uniform(100), ?SERVER, tick).
 
 -spec reschedule_gossip(state()) -> state().
 reschedule_gossip(#state{rumor = Rumor} = State) ->
@@ -404,42 +399,37 @@ receive_gossip_version(_, [], Vsn) ->
 receive_gossip_version(Ref, Nodes, Vsn) ->
   receive
     {gossip_vsn, Vsn, Ref, Node} ->
+      io:format("~p~n", [{Node, Vsn}]),
       receive_gossip_version(Ref, lists:delete(Node, Nodes), Vsn);
     {gossip_vsn, _MismatchVsn, Ref, _Node} ->
+      io:format("~p~n", [{_Node, _MismatchVsn}]),
       {error, gossip_vsn_mismatch}
   after ?STATUS_RECEIVE_TIMEOUT ->
     {error, {timeout, Nodes}}
   end.
 
--spec check_leader_change(Current :: rumor(), New :: rumor()) -> rumor().
-check_leader_change(#rumor{leader = Leader},
-                    #rumor{leader = Leader} = NewRumor) ->
-  NewRumor;
-check_leader_change(#rumor{leader = OldLeader},
-                    #rumor{leader = NewLeader} = NewRumor) ->
-  erlang:monitor_node(NewLeader, true),
-  erlang:monitor_node(OldLeader, false),
-  NewRumor.
+proxy_call(Command, From, State) ->
+  proxy_call(Command, From, State, []).
 
-proxy_call(Command, From, #state{rumor = #rumor{leader = Leader} = Rumor} = State)
-  when Leader =/= node() ->
+-spec proxy_call(term(), {pid(), Tag :: term()}, state(), [node()]) ->
+  {reply, term(), state()} | {noreply, state()}.
+proxy_call(Command, From,
+           #state{rumor = #rumor{leader = Leader} = Rumor} = State,
+           DownNodes) when Leader =/= node() ->
     case call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
-      {ok, {'EXIT', {{nodedown, Leader}, _}}} ->
+      {ok, {'EXIT', {Error, _}}} when {nodedown, Leader} == Error orelse
+                                      noproc == Error->
         ?LOG_DEBUG("Proxy call nodedown ~p", [Leader]),
-        NewLeader = simple_gossip_rumor:calculate_new_leader(Rumor),
+        NewDownNodes = [Leader | DownNodes],
+        NewLeader = simple_gossip_rumor:calculate_new_leader(Rumor, NewDownNodes),
         NewRumor = Rumor#rumor{leader = NewLeader},
-        proxy_call(Command, From, State#state{rumor = NewRumor});
-      {ok, {'EXIT', {noproc, _}}} ->
-        ?LOG_DEBUG("Proxy call noproc ~p", [Leader]),
-        NewLeader = simple_gossip_rumor:calculate_new_leader(Rumor),
-        NewRumor = Rumor#rumor{leader = NewLeader},
-        proxy_call(Command, From, State#state{rumor = NewRumor});
+        proxy_call(Command, From, State#state{rumor = NewRumor}, NewDownNodes);
       {ok, Else} ->
         {reply, Else, State};
       timeout ->
         {reply, timeout, State}
     end;
-proxy_call(Command, From, State) ->
+proxy_call(Command, From, State, _DownNodes) ->
   handle_command(Command, From, State).
 
 -spec join_node(rumor(), node()) -> rumor().

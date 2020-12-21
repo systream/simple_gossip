@@ -13,6 +13,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/simple_gossip.hrl").
 
 %%--------------------------------------------------------------------
 %% Function: suite() -> Info
@@ -116,8 +117,9 @@ all() ->
     status,
     status_timeout,
     stop_node,
-    stop_leader_node
-    %%status_mismatch
+    stop_leader_node,
+    start_from_persist_data,
+    serve_persist_from_memory
   ].
 
 %%--------------------------------------------------------------------
@@ -303,22 +305,6 @@ stop_leader_node(_Config) ->
   ct_slave:stop(Node1).
 
 
-%%status_mismatch(_Config) ->
-%%  simple_gossip:set("default"),
-%%  Node = start_slave_node('status_2'),
-%%  simple_gossip:join(Node),
-%%  ok = wait_to_reconcile(),
-
-%%  Rumor = {rumor, 1000, tweaked_data, Node, [Node], 8, 10000},
-
-%%  gen_server:cast({simple_gossip_server, Node}, {reconcile, Rumor, node()}),
-%%  ct:sleep(10),
-
-%%  ?assertMatch({error, mismatch}, simple_gossip:status()),
-%%  simple_gossip:leave(Node),
-%%  ct_slave:stop(Node).
-
-
 sync_connecting_node(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('sync_1'),
@@ -336,6 +322,25 @@ sync_connecting_node(_Config) ->
   simple_gossip:leave(Node1),
 
   ct_slave:stop(Node1).
+
+
+start_from_persist_data(_Config) ->
+  simple_gossip:set("from file test"),
+  [ok = simple_gossip:leave(Node) || Node <- nodes()],
+  simple_gossip_test_tools:stop_cluster(),
+  application:stop(simple_gossip),
+  application:ensure_all_started(simple_gossip),
+  ?assertEqual("from file test", simple_gossip:get()).
+
+serve_persist_from_memory(_Config) ->
+  ct:sleep(2000), % make sure data persisted
+  simple_gossip:set("test_from_not_persisted_data"),
+  ct:sleep(10), % make sure the event reach the persister service
+  ?assertMatch({ok, {rumor, _, _, "test_from_not_persisted_data", _, _, _, _}},
+               simple_gossip_persist:get()),
+  % after persist data
+  ?assertMatch({ok, {rumor, _, _, "test_from_not_persisted_data", _, _, _, _}},
+               simple_gossip_persist:get()).
 
 receive_notify(Ref) ->
   receive

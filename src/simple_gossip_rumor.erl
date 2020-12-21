@@ -23,7 +23,8 @@
          set_data/2,
          check_vector_clocks/2,
          change_gossip_period/2,
-         calculate_new_leader/1]).
+         calculate_new_leader/1,
+         calculate_new_leader/2]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
@@ -111,8 +112,13 @@ change_leader(Rumor) ->
   Rumor.
 
 -spec calculate_new_leader(rumor()) -> node().
-calculate_new_leader(#rumor{nodes = Nodes, leader = Leader}) ->
-  [_ | _] = ONodes = lists:usort(Nodes -- [Leader]),
+calculate_new_leader(Rumor) ->
+  calculate_new_leader(Rumor, []).
+
+-spec calculate_new_leader(rumor(), [node()]) -> node().
+calculate_new_leader(#rumor{nodes = Nodes, leader = Leader}, ExcludeNodes) when
+  is_list(ExcludeNodes) ->
+  [_ | _] = ONodes = lists:usort((Nodes -- [Leader]) -- ExcludeNodes),
   lists:nth(erlang:phash(ONodes, length(ONodes)), ONodes).
 
 -spec if_not_member(rumor(), node(), manage_node_fun()) -> rumor().

@@ -80,10 +80,10 @@ wait_to_reconcile(Node, Timeout) ->
   Master = self(),
   Pid =
     spawn(fun F() ->
-      timer:sleep(3),
+      timer:sleep(2),
       case rpc:call(Node, simple_gossip, status, []) of
         {error, gossip_vsn_mismatch, _Leader, _Nodes}->
-          timer:sleep(5),
+          timer:sleep(6),
           F();
         _Result ->
           Master ! {self(), ok}
