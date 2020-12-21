@@ -399,10 +399,8 @@ receive_gossip_version(_, [], Vsn) ->
 receive_gossip_version(Ref, Nodes, Vsn) ->
   receive
     {gossip_vsn, Vsn, Ref, Node} ->
-      io:format("~p~n", [{Node, Vsn}]),
       receive_gossip_version(Ref, lists:delete(Node, Nodes), Vsn);
     {gossip_vsn, _MismatchVsn, Ref, _Node} ->
-      io:format("~p~n", [{_Node, _MismatchVsn}]),
       {error, gossip_vsn_mismatch}
   after ?STATUS_RECEIVE_TIMEOUT ->
     {error, {timeout, Nodes}}
