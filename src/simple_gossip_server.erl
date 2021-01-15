@@ -156,13 +156,12 @@ handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
         end),
   {noreply, State};
 handle_call({join_request, #rumor{gossip_version = InGossipVsn} = InRumor},
-            _From,
+            {FromPid, _},
             #state{rumor = #rumor{gossip_version = CurrentGossipVsn}} = State)
   when InGossipVsn >= CurrentGossipVsn ->
-  {_FromPid, _} = _From,
   ?LOG_INFO(
     "Join request from ~p. Remote rumor (~p) is greater than the current (~p)" ++
-    " applying it", [node(_FromPid), InGossipVsn, CurrentGossipVsn]),
+    " applying it", [node(FromPid), InGossipVsn, CurrentGossipVsn]),
   gossip(InRumor),
   simple_gossip_event:notify(InRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = InRumor})};
@@ -414,7 +413,7 @@ proxy_call(Command, From, State) ->
 proxy_call(Command, From,
            #state{rumor = #rumor{leader = Leader} = Rumor} = State,
            DownNodes) when Leader =/= node() ->
-    case call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
+    case simple_gossip_call:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
       {ok, {'EXIT', {Error, _}}} when {nodedown, Leader} == Error orelse
                                       noproc == Error->
         ?LOG_DEBUG("Proxy call nodedown ~p", [Leader]),
@@ -435,7 +434,8 @@ join_node(Rumor, Node) ->
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
   net_kernel:connect_node(Node),
 
-  case call({?MODULE, Node}, {join_request, NewRumor}, ?PROXY_CALL_TIMEOUT) of
+  case simple_gossip_call:call({?MODULE, Node}, {join_request, NewRumor},
+                               ?PROXY_CALL_TIMEOUT) of
     {ok, {upgrade, UpgradeRumor}} ->
       ?LOG_DEBUG("Rumor upgraded from remote ~p ~p",
                               [Node, UpgradeRumor#rumor.gossip_version]),
@@ -444,28 +444,3 @@ join_node(Rumor, Node) ->
       NewRumor
   end.
 
-% prevent late responses
--spec call(ServerRef, term(), pos_integer()) -> {ok, term()} | timeout when
-  ServerRef ::
-    Name | {Name, node()} | {global, Name} | {via, module(), Name} | pid(),
-  Name :: term().
-call(Name, Request, Timeout) when Timeout > 10 ->
-  Self = self(),
-  Key = '$_prevent_late_msgs_$',
-  Pid = spawn(fun() ->
-                CallTimeout = Timeout-10,
-                Self !
-                  {Key, self(), catch gen_server:call(Name, Request, CallTimeout)}
-              end),
-  receive
-    {Key, Pid, Msg} ->
-      {ok, Msg}
-  after Timeout ->
-    exit(Pid, kill),
-    receive
-      {Key, Pid, Msg} ->
-        {ok, Msg}
-    after 10 ->
-      timeout
-    end
-  end.

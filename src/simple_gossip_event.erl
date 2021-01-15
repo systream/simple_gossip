@@ -45,22 +45,11 @@ notify(Rumor) ->
     async ->
       gen_server:cast(?SERVER, {notify, Rumor});
     sync ->
-      % to prevent late messages
-      Self = self(),
-      Pid = spawn(fun() ->
-                    Self ! {self(), gen_server:call(?SERVER, {notify, Rumor})}
-                  end),
-      receive
-        {Pid, Msg} ->
-          Msg
-      after 4000 ->
-        exit(Pid, kill),
-        receive
-          {Pid, Msg} ->
-            Msg
-        after 10 ->
-          timeout
-        end
+      case simple_gossip_call:call(?SERVER, {notify, Rumor}, 4000) of
+        {ok, ok} ->
+          ok;
+        Else ->
+          Else
       end
   end.
 
