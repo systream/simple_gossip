@@ -18,7 +18,8 @@ prop_set_get() ->
   application:ensure_all_started(simple_gossip),
 
   simple_gossip_test_tools:wait_to_reconcile(),
-  simple_gossip_server:set_gossip_period(2000),
+  simple_gossip_server:set_gossip_interval(5000),
+  simple_gossip_server:set_max_gossip_per_period(25),
   ?FORALL(Payload,
           term(),
           begin
@@ -33,7 +34,8 @@ prop_set_get_with_fun() ->
   simple_gossip_persist:delete_file(),
   application:ensure_all_started(simple_gossip),
   simple_gossip_test_tools:wait_to_reconcile(),
-  simple_gossip_server:set_gossip_period(2000),
+  simple_gossip_server:set_gossip_interval(5000),
+  simple_gossip_server:set_max_gossip_per_period(25),
   ?FORALL(Payload,
     term(),
     begin
@@ -52,7 +54,8 @@ prop_cluster() ->
   ok = simple_gossip_test_tools:wait_to_reconcile(Node1, 5000),
   [ok = rpc:call(Node1, simple_gossip, join, [Node], 5000) || Node <- Nodes, Node =/= Node1],
   ok = simple_gossip_test_tools:wait_to_reconcile(Node1, 15000),
-  rpc:call(Node1, simple_gossip_server, set_gossip_period, [2000], 5000),
+  rpc:call(Node1, simple_gossip_server, set_gossip_interval, [2000], 5000),
+  rpc:call(Node1, simple_gossip_server, set_max_gossip_per_period, [25], 5000),
   ?FORALL({Payload, Node, GetNode},
     {resize(500, term()), oneof(Nodes), oneof(Nodes)},
     begin
@@ -82,7 +85,8 @@ prop_cluster_stop_leader() ->
   rpc:call(Leader, application, stop, [simple_gossip]),
   ct_slave:stop(Leader),
   [OneNode | _] = AvailableNodes,
-  rpc:call(OneNode, simple_gossip_server, set_gossip_period, [2000], 5000),
+  rpc:call(OneNode, simple_gossip_server, set_gossip_interval, [2000], 5000),
+  rpc:call(OneNode, simple_gossip_server, set_max_gossip_per_period, [25], 5000),
 
   ?FORALL({Payload, Node, GetNode},
     {term(), oneof(AvailableNodes), oneof(AvailableNodes)},
@@ -106,7 +110,8 @@ prop_cluster_kill_leader() ->
   rpc:call(Leader, erlang, exit, [whereis(simple_gossip_server), kill]),
   ct_slave:stop(Leader),
   [OneNode | _] = AvailableNodes,
-  rpc:call(OneNode, simple_gossip_server, set_gossip_period, [2000], 5000),
+  rpc:call(OneNode, simple_gossip_server, set_gossip_interval, [5000], 5000),
+  rpc:call(OneNode, simple_gossip_server, set_max_gossip_per_period, [25], 5000),
   ?FORALL({Payload, TargetNode, GetNode},
     {term(), oneof(AvailableNodes), oneof(AvailableNodes)},
     begin

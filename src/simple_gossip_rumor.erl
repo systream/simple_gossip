@@ -22,7 +22,8 @@
          if_not_member/3,
          set_data/2,
          check_vector_clocks/2,
-         change_gossip_period/2,
+         change_max_gossip_per_period/2,
+         change_gossip_interval/2,
          calculate_new_leader/1,
          calculate_new_leader/2]).
 
@@ -42,9 +43,13 @@ new(#rumor{vector_clock = VectorClocks}) ->
          gossip_version = 1,
          vector_clock = VectorClocks}.
 
--spec change_gossip_period(rumor(), pos_integer()) -> rumor().
-change_gossip_period(#rumor{} = Rumor, Period) ->
-  Rumor#rumor{max_gossip_per_period = Period}.
+-spec change_max_gossip_per_period(rumor(), pos_integer()) -> rumor().
+change_max_gossip_per_period(#rumor{} = Rumor, Period) ->
+  increase_version(Rumor#rumor{max_gossip_per_period = Period}).
+
+-spec change_gossip_interval(rumor(), pos_integer()) -> rumor().
+change_gossip_interval(#rumor{} = Rumor, Interval) ->
+  increase_version(Rumor#rumor{gossip_period = Interval}).
 
 -spec increase_gossip_version(rumor()) -> rumor().
 increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->

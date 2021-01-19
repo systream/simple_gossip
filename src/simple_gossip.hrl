@@ -13,7 +13,7 @@
                 leader :: node(),
                 nodes = [] :: [node()],
                 max_gossip_per_period = 3 :: pos_integer(),
-                gossip_period = 10000 :: pos_integer()
+                gossip_period = 15000 :: pos_integer()
 }).
 
 -type rumor() :: #rumor{}.

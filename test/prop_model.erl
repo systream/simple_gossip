@@ -20,7 +20,7 @@ prop_test() ->
   simple_gossip_persist:delete_file(),
   application:ensure_all_started(simple_gossip),
   simple_gossip_test_tools:wait_to_reconcile(),
-  simple_gossip_server:set_gossip_period(2000),
+  simple_gossip_server:set_max_gossip_per_period(2000),
   ?FORALL(Cmds, commands(?MODULE),
           begin
               simple_gossip:set(1),

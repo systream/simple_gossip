@@ -27,7 +27,8 @@
 
          status/0,
 
-         set_gossip_period/1]).
+         set_max_gossip_per_period/1,
+         set_gossip_interval/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -77,9 +78,13 @@ leave(Node) ->
 status() ->
   gen_server:call(?SERVER, status).
 
--spec set_gossip_period(pos_integer()) -> ok.
-set_gossip_period(Period) ->
-  gen_server:call(?SERVER, {change_period, Period}).
+-spec set_max_gossip_per_period(pos_integer()) -> ok.
+set_max_gossip_per_period(Period) ->
+  gen_server:call(?SERVER, {change_max_gossip_per_period, Period}).
+
+-spec set_gossip_interval(pos_integer()) -> ok.
+set_gossip_interval(Interval) ->
+  gen_server:call(?SERVER, {change_interval, Interval}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -252,9 +257,15 @@ handle_command({leave, Node}, _From,
   gossip(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
-handle_command({change_period, Period}, _From,
+handle_command({change_max_gossip_per_period, Period}, _From,
                #state{rumor = Rumor} = State) ->
-  NewRumor = simple_gossip_rumor:change_gossip_period(Rumor, Period),
+  NewRumor = simple_gossip_rumor:change_max_gossip_per_period(Rumor, Period),
+  gossip(NewRumor),
+  simple_gossip_event:notify(NewRumor),
+  {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+handle_command({change_interval, Interval}, _From,
+               #state{rumor = Rumor} = State) ->
+  NewRumor = simple_gossip_rumor:change_gossip_interval(Rumor, Interval),
   gossip(NewRumor),
   simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})}.
