@@ -36,16 +36,16 @@ do_call(Name, Request, Timeout, Parent) when Timeout > 10 ->
 
 -spec receive_response(pid(), pos_integer(), fun() | term()) ->
   {ok, term()} | term().
-receive_response(Pid, Timeout, Next) ->
+receive_response(Pid, Timeout, OnTimeout) ->
   receive
     {?MSG_KEY, Pid, Msg} ->
       {ok, Msg}
   after Timeout ->
-    case Next of
-      Next when is_function(Next) ->
-        Next;
+    case OnTimeout of
+      OnTimeout when is_function(OnTimeout) ->
+        OnTimeout();
       _ ->
-        Next
+        OnTimeout
     end
   end.
 
