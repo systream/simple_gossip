@@ -27,6 +27,8 @@
 
          status/0,
 
+         get_gossip/0,
+
          set_max_gossip_per_period/1,
          set_gossip_interval/1]).
 
@@ -86,6 +88,10 @@ set_max_gossip_per_period(Period) ->
 set_gossip_interval(Interval) ->
   gen_server:call(?SERVER, {change_interval, Interval}).
 
+-spec get_gossip() -> rumor().
+get_gossip() ->
+  gen_server:call(?SERVER, whisper_your_gossip, 100).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -122,7 +128,7 @@ init([]) ->
     case simple_gossip_persist:get() of
       {ok, StoredRumor} ->
         ?LOG_DEBUG("Read rumor from file", []),
-        StoredRumor;
+        pre_sync(StoredRumor);
       {error, undefined} ->
         ?LOG_DEBUG("No rumor file found", []),
         simple_gossip_rumor:new()
@@ -130,6 +136,24 @@ init([]) ->
   State = #state{rumor = Rumor},
   {ok, reschedule_gossip(State)}.
 
+-spec pre_sync(rumor()) -> rumor().
+pre_sync(#rumor{nodes = Nodes} = StoredRumor) ->
+  NewNodes = remove_current_node(Nodes),
+  case simple_gossip_rumor:pick_random_nodes(NewNodes, 1) of
+    [Node] ->
+      case catch rpc:call(Node, ?MODULE, get_gossip, []) of
+        {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
+          ?LOG_DEBUG("PreSynced rumor from ~p gvsn: ~p", [Node, NewRumor#rumor.gossip_version]),
+          NewRumor;
+        Else ->
+          ?LOG_DEBUG("Cannot get fresh gossip From ~p Reason: ~p",
+                     [Node, Else]),
+          StoredRumor
+      end;
+    _ ->
+      % from nowhere to sync
+      StoredRumor
+  end.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -268,7 +292,10 @@ handle_command({change_interval, Interval}, _From,
   NewRumor = simple_gossip_rumor:change_gossip_interval(Rumor, Interval),
   gossip(NewRumor),
   simple_gossip_event:notify(NewRumor),
-  {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})}.
+  {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+handle_command(whisper_your_gossip, _From,
+               #state{rumor = Rumor} = State) ->
+  {reply, {ok, Rumor}, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -362,9 +389,12 @@ gossip(#rumor{nodes = Nodes} = Rumor) ->
 gossip_random_node(#rumor{nodes = []}) ->
   ok;
 gossip_random_node(#rumor{nodes = Nodes} = Rumor) ->
-  NewNodes = lists:delete(node(), Nodes),
-  RandomNodes = simple_gossip_rumor:pick_random_nodes(NewNodes, 1),
-  gossip(Rumor, RandomNodes).
+  NewNodes = remove_current_node(Nodes),
+  gossip(Rumor, simple_gossip_rumor:pick_random_nodes(NewNodes, 1)).
+
+-spec remove_current_node([node()]) -> [node()].
+remove_current_node(Nodes) ->
+  lists:delete(node(), Nodes).
 
 -spec gossip(rumor(), node() | [node()]) -> ok.
 gossip(#rumor{max_gossip_per_period = Max} = Rumor, Nodes) when is_list(Nodes) ->
@@ -424,9 +454,9 @@ proxy_call(Command, From, State) ->
 proxy_call(Command, From,
            #state{rumor = #rumor{leader = Leader} = Rumor} = State,
            DownNodes) when Leader =/= node() ->
-    case simple_gossip_call:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
+    case call(Leader, Command) of
       {ok, {'EXIT', {Error, _}}} when {nodedown, Leader} == Error orelse
-                                      noproc == Error->
+                                      noproc == Error ->
         ?LOG_DEBUG("Proxy call nodedown ~p", [Leader]),
         NewDownNodes = [Leader | DownNodes],
         NewLeader = simple_gossip_rumor:calculate_new_leader(Rumor, NewDownNodes),
@@ -439,6 +469,18 @@ proxy_call(Command, From,
     end;
 proxy_call(Command, From, State, _DownNodes) ->
   handle_command(Command, From, State).
+
+call(Leader, Command) ->
+  call(Leader, Command, 1).
+
+call(Leader, Command, Retry) ->
+  case simple_gossip_call:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
+    {ok, {'EXIT', {Error, _}}}
+      when ({nodedown, Leader} == Error orelse noproc == Error) andalso Retry >= 1 ->
+      call(Leader, Command, Retry-1);
+    Else ->
+      Else
+  end.
 
 -spec join_node(rumor(), node()) -> rumor().
 join_node(Rumor, Node) ->

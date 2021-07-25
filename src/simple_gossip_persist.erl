@@ -22,10 +22,8 @@
          handle_info/2,
          terminate/2]).
 
--ifdef(TEST).
 -export([get_file_path/0,
          get_file_path/1]).
--endif.
 
 -define(SAVE_INTERVAL, 2000).
 -define(ITERATION_THRESHOLD, 30).
