@@ -74,7 +74,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
 %% @doc Determines whether a command should be valid under the
 %% current state.
 precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 100),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 120),
   true;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
