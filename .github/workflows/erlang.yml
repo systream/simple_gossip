@@ -8,12 +8,12 @@ on:
 
 jobs:
 
-  erlang-22:
+  erlang-23:
 
     runs-on: ubuntu-latest
 
     container:
-      image: erlang:22
+      image: erlang:23
 
     steps:
     - uses: actions/checkout@v2
@@ -24,12 +24,12 @@ jobs:
     - name: dialyzer
       run: rebar3 dialyzer
 
-  erlang-23:
+  erlang-24:
 
     runs-on: ubuntu-latest
 
     container:
-      image: erlang:23
+      image: erlang:24
 
     steps:
       - uses: actions/checkout@v2
@@ -40,12 +40,12 @@ jobs:
       - name: dialyzer
         run: rebar3 dialyzer
 
-  erlang-24:
+  erlang-25:
 
     runs-on: ubuntu-latest
 
     container:
-      image: erlang:24
+      image: erlang:25
 
     steps:
       - uses: actions/checkout@v2
