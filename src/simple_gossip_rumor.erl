@@ -8,6 +8,8 @@
 -module(simple_gossip_rumor).
 -author("Peter Tihanyi").
 
+-compile({no_auto_import, [nodes/1]}).
+
 -include("simple_gossip.hrl").
 
 %% API
@@ -16,11 +18,13 @@
          add_node/2,
          change_leader/1,
          remove_node/2,
+         nodes/1,
          pick_random_nodes/2,
          check_node_exclude/1,
          if_member/3,
          if_not_member/3,
          set_data/2,
+         data/1,
          check_vector_clocks/2,
          change_max_gossip_per_period/2,
          change_gossip_interval/2,
@@ -76,9 +80,17 @@ add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
                 end
   ).
 
+-spec nodes(rumor()) -> [node()].
+nodes(#rumor{nodes = Nodes}) ->
+  Nodes.
+
 -spec set_data(rumor(), term()) -> rumor().
 set_data(#rumor{} = Rumor, Data) ->
   increase_version(Rumor#rumor{data = Data}).
+
+-spec data(rumor()) -> term().
+data(#rumor{data = Data}) ->
+  Data.
 
 -spec remove_node(rumor(), node()) -> rumor().
 remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
