@@ -137,7 +137,8 @@ init([]) ->
   {ok, reschedule_gossip(State)}.
 
 -spec pre_sync(rumor()) -> rumor().
-pre_sync(#rumor{nodes = Nodes} = StoredRumor) ->
+pre_sync(StoredRumor) ->
+  Nodes = simple_gossip_rumor:nodes(StoredRumor),
   NewNodes = remove_current_node(Nodes),
   case simple_gossip_rumor:pick_random_nodes(NewNodes, 1) of
     [Node] ->
@@ -169,8 +170,8 @@ pre_sync(#rumor{nodes = Nodes} = StoredRumor) ->
   {noreply, NewState :: state(), timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
   {stop, Reason :: term(), NewState :: state()}).
-handle_call(get, _From, #state{rumor = #rumor{data = Data}} = State) ->
-  {reply, Data, State};
+handle_call(get, _From, #state{rumor = Rumor} = State) ->
+  {reply, simple_gossip_rumor:data(Rumor), State};
 handle_call({set, Data}, From, State) ->
   proxy_call({set, Data}, From, State);
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
@@ -217,9 +218,9 @@ handle_call(Command, From, State) ->
                    {noreply, NewState :: state(), timeout() | hibernate} |
                    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
                    {stop, Reason :: term(), NewState :: state()}).
-handle_command({set, ChangeFun}, _From, #state{rumor = #rumor{data = Data} = Rumor} = State)
+handle_command({set, ChangeFun}, _From, #state{rumor = Rumor} = State)
   when is_function(ChangeFun) ->
-  case ChangeFun(Data) of
+  case ChangeFun(simple_gossip_rumor:data(Rumor)) of
     {change, NewData} ->
       NewRumor = simple_gossip_rumor:set_data(Rumor, NewData),
       ?LOG_DEBUG("Set data: ~p vsn: ~p",
@@ -317,7 +318,7 @@ handle_cast({reconcile,
     true ->
       NewRumor1 = simple_gossip_rumor:check_node_exclude(InRumor),
       GossipNodes = lists:delete(SenderNode,
-                                 lists:delete(node(), NewRumor1#rumor.nodes)),
+                                 lists:delete(node(), simple_gossip_rumor:nodes(NewRumor1))),
       gossip(NewRumor1, GossipNodes),
       simple_gossip_event:notify(NewRumor1),
       ?LOG_DEBUG("New gossip ~p From ~p",
@@ -381,15 +382,14 @@ terminate(_Reason, _State) ->
 %%% Internal functions
 %%%===================================================================
 -spec gossip(rumor()) -> ok.
-gossip(#rumor{nodes = Nodes} = Rumor) ->
-  NewNodes = lists:delete(node(), Nodes),
-  gossip(Rumor, NewNodes).
+gossip(Rumor) ->
+  gossip(Rumor, remove_current_node(simple_gossip_rumor:nodes(Rumor))).
 
 -spec gossip_random_node(rumor()) -> ok.
 gossip_random_node(#rumor{nodes = []}) ->
   ok;
-gossip_random_node(#rumor{nodes = Nodes} = Rumor) ->
-  NewNodes = remove_current_node(Nodes),
+gossip_random_node(Rumor) ->
+  NewNodes = remove_current_node(simple_gossip_rumor:nodes(Rumor)),
   gossip(Rumor, simple_gossip_rumor:pick_random_nodes(NewNodes, 1)).
 
 -spec remove_current_node([node()]) -> [node()].

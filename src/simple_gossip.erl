@@ -7,9 +7,12 @@
 %%%-------------------------------------------------------------------
 -module(simple_gossip).
 -author("Peter Tihanyi").
+-include("simple_gossip.hrl").
 
 %% API
 -export([set/1, get/0, join/1, leave/1, status/0, subscribe/1, unsubscribe/1]).
+
+-export([subscribe/2]).
 
 -type set_fun() :: fun((term()) -> {change, term()} | no_change).
 
@@ -26,10 +29,15 @@ set(Data) ->
 get() ->
   simple_gossip_server:get().
 
-%% @doc Subscribe to rumor changes
+%% @doc Subscribe to data changes
 -spec subscribe(pid()) -> ok.
 subscribe(Pid) ->
   simple_gossip_event:subscribe(Pid).
+
+%% @doc Subscribe to data or rumor changes
+-spec subscribe(pid(), Type :: data | rumor) -> ok.
+subscribe(Pid, Type) ->
+  simple_gossip_event:subscribe(Pid, Type).
 
 %% @doc Unsubscribe from rumor changes
 -spec unsubscribe(pid()) -> ok.

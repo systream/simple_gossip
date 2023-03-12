@@ -58,7 +58,7 @@ subscribe(Pid) ->
   subscribe(Pid, data).
 
 -spec subscribe(pid(), Type :: data | rumor) -> ok.
-subscribe(Pid, Type) ->
+subscribe(Pid, Type) when Type =:= data orelse Type =:= rumor ->
   gen_server:call(?SERVER, {subscribe, Pid, Type}).
 
 -spec unsubscribe(pid()) -> ok.

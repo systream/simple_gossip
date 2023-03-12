@@ -17,3 +17,4 @@
 }).
 
 -type rumor() :: #rumor{}.
+-export_type([rumor/0]).

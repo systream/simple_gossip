@@ -155,7 +155,7 @@ set_get_via_fun_no_change(_Config) ->
 notify_change(_Config) ->
   application:ensure_all_started(simple_gossip),
   Ref = make_ref(),
-  ok =simple_gossip:subscribe(self()),
+  ok = simple_gossip:subscribe(self()),
   ok = simple_gossip:subscribe(self()), % check double subscribe -> should no effect
   simple_gossip:set({"new", Ref}),
   ?assertMatch({ok, _}, receive_notify(Ref)),
@@ -165,6 +165,11 @@ notify_change(_Config) ->
   Ref2 = make_ref(),
   simple_gossip:set({"new2", Ref2}),
   ?assertMatch(timeout, receive_notify(Ref)),
+  simple_gossip:unsubscribe(self()),
+
+  simple_gossip:subscribe(self(), rumor),
+  simple_gossip:set(test),
+  ?assertMatch({ok, #rumor{data = test}}, receive_rumor_notification()),
   simple_gossip:unsubscribe(self()).
 
 notify_change_not_on_leader(_Config) ->
@@ -349,3 +354,12 @@ receive_notify(Ref) ->
   after 1000 ->
     timeout
   end.
+
+receive_rumor_notification() ->
+  receive
+    {rumor_changed, Rumor} ->
+      {ok, Rumor}
+  after 1000 ->
+    timeout
+  end.
+
