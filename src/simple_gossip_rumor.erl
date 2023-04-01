@@ -137,7 +137,7 @@ calculate_new_leader(Rumor) ->
 calculate_new_leader(#rumor{nodes = Nodes, leader = Leader}, ExcludeNodes) when
   is_list(ExcludeNodes) ->
   [_ | _] = ONodes = lists:usort((Nodes -- [Leader]) -- ExcludeNodes),
-  lists:nth(erlang:phash(ONodes, length(ONodes)), ONodes).
+  lists:nth(erlang:phash2(ONodes, length(ONodes))+1, ONodes).
 
 -spec if_not_member(rumor(), node(), manage_node_fun()) -> rumor().
 if_not_member(Rumor, Node, Fun) ->
