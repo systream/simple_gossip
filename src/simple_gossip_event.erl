@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_event).
--author("Peter Tihanyi").
 
 -behaviour(gen_server).
 
@@ -150,7 +149,7 @@ handle_cast({notify, Rumor}, State) ->
   {noreply, NewState :: state()} |
   {noreply, NewState :: state(), hibernate}.
 handle_info({'DOWN', _, process, Pid, _Reason},
-            State = #state{subscribers = Subscribers}) ->
+            #state{subscribers = Subscribers} = State) ->
   check_mode(),
   {noreply, State#state{subscribers = maps:remove(Pid, Subscribers)}}.
 

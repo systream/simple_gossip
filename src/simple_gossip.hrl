@@ -5,7 +5,6 @@
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
--author("Peter Tihanyi").
 
 -record(rumor, {gossip_version = 1 :: pos_integer(),
                 vector_clock = #{} :: #{node() => pos_integer()},

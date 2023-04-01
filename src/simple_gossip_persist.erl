@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_persist).
--author("Peter Tihanyi").
 
 -behaviour(gen_server).
 

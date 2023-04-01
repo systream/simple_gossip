@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_server).
--author("Peter Tihanyi").
 
 -behaviour(gen_server).
 
@@ -63,7 +62,7 @@ set(Data) ->
 get() ->
   gen_server:call(?SERVER, get).
 
--spec join(node()) -> ok.
+-spec join(node()) -> ok | {error, term()}.
 join(Node) ->
   gen_server:call(?SERVER, {join, Node}).
 
@@ -218,16 +217,11 @@ handle_call(Command, From, State) ->
                    {noreply, NewState :: state(), timeout() | hibernate} |
                    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
                    {stop, Reason :: term(), NewState :: state()}).
-handle_command({set, ChangeFun}, _From, #state{rumor = Rumor} = State)
+handle_command({set, ChangeFun}, From, #state{rumor = Rumor} = State)
   when is_function(ChangeFun) ->
   case ChangeFun(simple_gossip_rumor:data(Rumor)) of
     {change, NewData} ->
-      NewRumor = simple_gossip_rumor:set_data(Rumor, NewData),
-      ?LOG_DEBUG("Set data: ~p vsn: ~p",
-                 [erlang:phash2(NewData, 9999), NewRumor#rumor.gossip_version]),
-      gossip(NewRumor),
-      simple_gossip_event:notify(NewRumor),
-      {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+      handle_command({set, NewData}, From, State);
     no_change ->
       {reply, ok, State}
   end;
@@ -240,11 +234,17 @@ handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
 handle_command({join, Node}, _From, #state{rumor = Rumor} = State) ->
-  NewRumor = simple_gossip_rumor:if_not_member(Rumor, Node,
-                                               fun() -> join_node(Rumor, Node) end),
-  gossip(NewRumor),
-  simple_gossip_event:notify(NewRumor),
-  {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+  case net_kernel:connect_node(Node) of
+    true ->
+      NewRumor = simple_gossip_rumor:if_not_member(Rumor, Node, fun() ->
+                                                                  join_node(Rumor, Node)
+                                                                end),
+      gossip(NewRumor),
+      simple_gossip_event:notify(NewRumor),
+      {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+    _ ->
+      {reply, {error, {could_not_connect_to_node, Node}}, State}
+  end;
 
 handle_command({leave, Node}, _From,
                #state{rumor = #rumor{nodes = [Node]}} = State) ->
@@ -328,13 +328,13 @@ handle_cast({reconcile,
       ?LOG_WARNING("Dropped newer gossip due to vclock check", []),
       {noreply, State}
   end;
-handle_cast({reconcile, Rumor, _SenderNode}, State) ->
+handle_cast({reconcile, Rumor, SenderNode}, State) ->
   ?LOG_DEBUG("Gossip ~p dropped due to lower version, From ~p",
-             [Rumor#rumor.gossip_version, _SenderNode]),
+             [Rumor#rumor.gossip_version, SenderNode]),
   {noreply, State};
 
 handle_cast({get_gossip_version, Requester, Ref},
-            State = #state{rumor = #rumor{gossip_version = Vsn}}) ->
+            #state{rumor = #rumor{gossip_version = Vsn}} = State) ->
   Requester ! {gossip_vsn, Vsn, Ref, node()},
   {noreply, State}.
 
@@ -406,7 +406,7 @@ gossip(Rumor, Node) ->
 
 -spec schedule_gossip(rumor()) -> reference().
 schedule_gossip(#rumor{gossip_period = Period}) ->
-  erlang:send_after(Period+rand:uniform(100), ?SERVER, tick).
+  erlang:send_after(Period + rand:uniform(100), ?SERVER, tick).
 
 -spec reschedule_gossip(state()) -> state().
 reschedule_gossip(#state{rumor = Rumor} = State) ->
@@ -477,7 +477,7 @@ call(Leader, Command, Retry) ->
   case simple_gossip_call:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
     {ok, {'EXIT', {Error, _}}}
       when ({nodedown, Leader} == Error orelse noproc == Error) andalso Retry >= 1 ->
-      call(Leader, Command, Retry-1);
+      call(Leader, Command, Retry - 1);
     Else ->
       Else
   end.
@@ -485,8 +485,6 @@ call(Leader, Command, Retry) ->
 -spec join_node(rumor(), node()) -> rumor().
 join_node(Rumor, Node) ->
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
-  net_kernel:connect_node(Node),
-
   case simple_gossip_call:call({?MODULE, Node}, {join_request, NewRumor},
                                ?PROXY_CALL_TIMEOUT) of
     {ok, {upgrade, UpgradeRumor}} ->

@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_rumor).
--author("Peter Tihanyi").
 
 -compile({no_auto_import, [nodes/1]}).
 
@@ -33,6 +32,8 @@
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
+
+-export_type([manage_node_fun/0]).
 
 -spec new() -> rumor().
 new() ->
@@ -118,7 +119,7 @@ pick_random_nodes(Nodes, Number, Acc) when Nodes == [] orelse Number == 0 ->
   Acc;
 pick_random_nodes(Nodes, Number, Acc) ->
   Node = lists:nth(rand:uniform(length(Nodes)), Nodes),
-  pick_random_nodes(lists:delete(Node, Nodes), Number-1, [Node | Acc]).
+  pick_random_nodes(lists:delete(Node, Nodes), Number - 1, [Node | Acc]).
 
 -spec change_leader(rumor()) -> rumor().
 change_leader(#rumor{nodes = Nodes, leader = Leader} = Rumor)

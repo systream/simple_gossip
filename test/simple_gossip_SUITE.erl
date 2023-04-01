@@ -175,7 +175,7 @@ notify_change(_Config) ->
 notify_change_not_on_leader(_Config) ->
   NodeName = 'notify1',
   Host = simple_gossip_test_tools:start_slave_node(NodeName),
-  simple_gossip:join(Host),
+  ok = simple_gossip:join(Host),
   simple_gossip_test_tools:wait_to_reconcile(),
   ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
   ok = rpc:call(Host, simple_gossip, subscribe, [self()]),
@@ -205,11 +205,14 @@ join_node(_Config) ->
   simple_gossip:set("test_11"),
   NodeName = 'test1',
   Host = simple_gossip_test_tools:start_slave_node(NodeName),
-  simple_gossip:join(Host),
+  ok = simple_gossip:join(Host),
   simple_gossip_test_tools:wait_to_reconcile(),
   ?assertEqual("test_11", rpc:call(Host, simple_gossip, get, [])),
   simple_gossip:leave(Host),
-  ct_slave:stop(Host).
+  ct_slave:stop(Host),
+
+  {error, {could_not_connect_to_node, 'not_existing@host'}} =
+    simple_gossip:join('not_existing@host').
 
 leave_self(_Config) ->
   ?assertEqual(ok, simple_gossip:leave(node())),
@@ -219,7 +222,7 @@ leave_self(_Config) ->
 leave_by_another_node(_Config) ->
   NodeName = 'test_leave_test',
   Node = simple_gossip_test_tools:start_slave_node(NodeName),
-  simple_gossip:join(Node),
+  ok = simple_gossip:join(Node),
   simple_gossip_test_tools:wait_to_reconcile(),
   SelfNode = node(),
   ok = rpc:call(Node, simple_gossip, leave, [SelfNode]),
@@ -232,8 +235,8 @@ sync_between_nodes(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('sync_1'),
   Node2 = simple_gossip_test_tools:start_slave_node('sync_2'),
-  simple_gossip:join(Node1),
-  simple_gossip:join(Node2),
+  ok = simple_gossip:join(Node1),
+  ok = simple_gossip:join(Node2),
 
   simple_gossip:set("main"),
   simple_gossip_test_tools:wait_to_reconcile(),
@@ -263,7 +266,7 @@ sync_between_nodes(_Config) ->
 status(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('status_1'),
-  simple_gossip:join(Node1),
+  ok = simple_gossip:join(Node1),
   simple_gossip:set("a"),
   simple_gossip_test_tools:wait_to_reconcile(),
   Node = node(),
@@ -273,8 +276,9 @@ status(_Config) ->
 
 status_timeout(_Config) ->
   simple_gossip:set("default"),
-  Node = 'test_no_node@local',
-  simple_gossip:join(Node),
+  Node = simple_gossip_test_tools:start_slave_node('status_timeout_node'),
+  ok = simple_gossip:join(Node),
+  simple_gossip_test_tools:stop_cluster([Node]),
   CurrentNode = node(),
   ?assertMatch({error, {timeout, [Node]}, CurrentNode, [Node, CurrentNode]},
                simple_gossip:status()),
@@ -283,7 +287,7 @@ status_timeout(_Config) ->
 stop_node(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('stop_1'),
-  simple_gossip:join(Node1),
+  ok = simple_gossip:join(Node1),
   simple_gossip_test_tools:wait_to_reconcile(),
   simple_gossip:set(test),
   Node = node(),
@@ -297,7 +301,7 @@ stop_node(_Config) ->
 stop_leader_node(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('stop_2'),
-  simple_gossip:join(Node1),
+  ok = simple_gossip:join(Node1),
   simple_gossip_test_tools:wait_to_reconcile(),
   simple_gossip:set(test),
   Node = node(),

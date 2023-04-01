@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip).
--author("Peter Tihanyi").
 -include("simple_gossip.hrl").
 
 %% API
@@ -45,7 +44,7 @@ unsubscribe(Pid) ->
   simple_gossip_event:unsubscribe(Pid).
 
 %% @doc Join node to cluster
--spec join(node()) -> ok.
+-spec join(node()) -> ok | {error, term()}.
 join(Node) ->
   simple_gossip_server:join(Node).
 

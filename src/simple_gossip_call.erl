@@ -6,7 +6,6 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(simple_gossip_call).
--author("Peter Tihanyi").
 
 -define(MSG_KEY, '$_prevent_late_msgs_$').
 
@@ -31,7 +30,7 @@ spawn_call(Name, Request, Timeout) ->
   spawn(fun() -> do_call(Name, Request, Timeout, Self) end).
 
 do_call(Name, Request, Timeout, Parent) when Timeout > 10 ->
-  CallTimeout = Timeout-10,
+  CallTimeout = Timeout - 10,
   Parent ! {?MSG_KEY, self(), catch gen_server:call(Name, Request, CallTimeout)}.
 
 -spec receive_response(pid(), pos_integer(), fun() | term()) ->
