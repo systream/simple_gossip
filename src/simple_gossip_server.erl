@@ -147,20 +147,25 @@ fetch_gossip(Nodes, StoredRumor) ->
         {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
           ?LOG_INFO("PreSync rumor from ~p gossip vsn: ~p", [Node, NewRumor#rumor.gossip_version]),
           simple_gossip_rumor:check_node_exclude(NewRumor);
+        {ok, NewRumor} when NewRumor#rumor.gossip_version =< StoredRumor#rumor.gossip_version ->
+          ?LOG_INFO("Cannot get fresh gossip From ~p Reason: older gossip vsn ~p > ~p",
+                      [Node, NewRumor#rumor.gossip_version, StoredRumor#rumor.gossip_version]),
+          maybe_fetch_gossip(Nodes -- [Node], StoredRumor);
         Else ->
           ?LOG_WARNING("Cannot get fresh gossip From ~p Reason: ~p", [Node, Else]),
-          case Nodes -- [Node] of
-            [] ->
-              ?LOG_WARNING("No more nodes available for pre syncing rumor, using localy stored"),
-              StoredRumor;
-            NewNodes ->
-              fetch_gossip(NewNodes, StoredRumor)
-          end
+          maybe_fetch_gossip(Nodes -- [Node], StoredRumor)
       end;
     _ ->
       % from nowhere to sync
       StoredRumor
   end.
+
+-spec maybe_fetch_gossip([node()], rumor()) -> rumor().
+maybe_fetch_gossip([], StoredRumor) ->
+  ?LOG_WARNING("No more nodes available for pre syncing rumor, using localy stored"),
+  StoredRumor;
+maybe_fetch_gossip(NewNodes, StoredRumor) ->
+  fetch_gossip(NewNodes, StoredRumor).
 
 %%--------------------------------------------------------------------
 %% @private
