@@ -145,11 +145,10 @@ fetch_gossip(Nodes, StoredRumor) ->
     [Node] ->
       case catch rpc:call(Node, ?MODULE, get_gossip, []) of
         {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
-          ?LOG_DEBUG("PreSynced rumor from ~p gvsn: ~p", [Node, NewRumor#rumor.gossip_version]),
+          ?LOG_INFO("PreSync rumor from ~p gossip vsn: ~p", [Node, NewRumor#rumor.gossip_version]),
           simple_gossip_rumor:check_node_exclude(NewRumor);
         Else ->
-          ?LOG_DEBUG("Cannot get fresh gossip From ~p Reason: ~p",
-            [Node, Else]),
+          ?LOG_WARNING("Cannot get fresh gossip From ~p Reason: ~p", [Node, Else]),
           case Nodes -- [Node] of
             [] ->
               ?LOG_WARNING("No more nodes available for pre syncing rumor, using localy stored"),
