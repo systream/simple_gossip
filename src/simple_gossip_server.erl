@@ -87,7 +87,7 @@ set_max_gossip_per_period(Period) ->
 set_gossip_interval(Interval) ->
   gen_server:call(?SERVER, {change_interval, Interval}).
 
--spec get_gossip() -> rumor().
+-spec get_gossip() -> {ok, rumor()}.
 get_gossip() ->
   gen_server:call(?SERVER, whisper_your_gossip, 100).
 
@@ -137,9 +137,11 @@ init([]) ->
 
 -spec pre_sync(rumor()) -> rumor().
 pre_sync(StoredRumor) ->
-  Nodes = simple_gossip_rumor:nodes(StoredRumor),
-  NewNodes = remove_current_node(Nodes),
-  case simple_gossip_rumor:pick_random_nodes(NewNodes, 1) of
+  fetch_gossip(remove_current_node(simple_gossip_rumor:nodes(StoredRumor)), StoredRumor).
+
+-spec fetch_gossip([node()], rumor()) -> rumor().
+fetch_gossip(Nodes, StoredRumor) ->
+  case simple_gossip_rumor:pick_random_nodes(Nodes, 1) of
     [Node] ->
       case catch rpc:call(Node, ?MODULE, get_gossip, []) of
         {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
@@ -147,13 +149,20 @@ pre_sync(StoredRumor) ->
           simple_gossip_rumor:check_node_exclude(NewRumor);
         Else ->
           ?LOG_DEBUG("Cannot get fresh gossip From ~p Reason: ~p",
-                     [Node, Else]),
-          StoredRumor
+            [Node, Else]),
+          case Nodes -- [Node] of
+            [] ->
+              ?LOG_WARNING("No more nodes available for pre syncing rumor, using localy stored"),
+              StoredRumor;
+            NewNodes ->
+              fetch_gossip(NewNodes, StoredRumor)
+          end
       end;
     _ ->
       % from nowhere to sync
       StoredRumor
   end.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
