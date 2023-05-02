@@ -144,7 +144,7 @@ pre_sync(StoredRumor) ->
       case catch rpc:call(Node, ?MODULE, get_gossip, []) of
         {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
           ?LOG_DEBUG("PreSynced rumor from ~p gvsn: ~p", [Node, NewRumor#rumor.gossip_version]),
-          NewRumor;
+          simple_gossip_rumor:check_node_exclude(NewRumor);
         Else ->
           ?LOG_DEBUG("Cannot get fresh gossip From ~p Reason: ~p",
                      [Node, Else]),

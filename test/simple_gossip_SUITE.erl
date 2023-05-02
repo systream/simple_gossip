@@ -114,6 +114,7 @@ all() ->
     leave_by_another_node,
     sync_between_nodes,
     sync_connecting_node,
+    leave_during_nodedown,
     status,
     status_timeout,
     stop_node,
@@ -331,6 +332,35 @@ sync_connecting_node(_Config) ->
   simple_gossip:leave(Node1),
 
   ct_slave:stop(Node1).
+
+leave_during_nodedown(_Config) ->
+  Node1 = simple_gossip_test_tools:start_slave_node('split_1'),
+
+  ok = rpc:call(Node1, simple_gossip, join, [node()]),
+
+  simple_gossip:set("synctest"),
+  simple_gossip_test_tools:wait_to_reconcile(),
+
+  Nodes = get_nodes(simple_gossip:status()),
+  ?assertEqual(Nodes, get_nodes(rpc:call(Node1, simple_gossip, status, []))),
+  rpc:call(Node1, application, stop, [simple_gossip]),
+  simple_gossip:leave(Node1),
+
+  CurrentNode = node(),
+  ?assertEqual([CurrentNode], get_nodes(simple_gossip:status())),
+  rpc:call(Node1, application, ensure_all_started, [simple_gossip]),
+
+  ct:sleep(100),
+
+  ?assertEqual([Node1], get_nodes(rpc:call(Node1, simple_gossip, status, []))),
+
+  ct_slave:stop(Node1).
+
+get_nodes({ok, _Vsn, _Leader, Nodes}) ->
+  Nodes;
+get_nodes({error, _Reason, _Leader, Nodes}) ->
+  Nodes.
+
 
 
 start_from_persist_data(_Config) ->
