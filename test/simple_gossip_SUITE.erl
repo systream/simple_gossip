@@ -120,7 +120,8 @@ all() ->
     stop_node,
     stop_leader_node,
     start_from_persist_data,
-    serve_persist_from_memory
+    serve_persist_from_memory,
+    vclock
   ].
 
 %%--------------------------------------------------------------------
@@ -380,6 +381,23 @@ serve_persist_from_memory(_Config) ->
   % after persist data
   ?assertMatch({ok, {rumor, _, _, "test_from_not_persisted_data", _, _, _, _}},
                simple_gossip_persist:get()).
+
+vclock(_Config) ->
+  A = simple_gossip_vclock:new(),
+  B = simple_gossip_vclock:new(),
+  ?assert(simple_gossip_vclock:descendant(A, B)),
+  ?assert(simple_gossip_vclock:descendant(B, A)),
+  A1_1 = simple_gossip_vclock:increment(A, node_a),
+  A1_2 = simple_gossip_vclock:increment(A, node_b),
+  ?assert(simple_gossip_vclock:descendant(A1_1, A)),
+  ?assert(simple_gossip_vclock:descendant(A1_2, A)),
+  ?assertNot(simple_gossip_vclock:descendant(A1_2, A1_1)),
+  ?assertNot(simple_gossip_vclock:descendant(A1_1, A1_2)),
+  A2 = simple_gossip_vclock:increment(A1_1, node_b),
+  ?assert(simple_gossip_vclock:descendant(A2, A1_1)),
+  ?assert(simple_gossip_vclock:descendant(A2, A)),
+  ?assertNot(simple_gossip_vclock:descendant(A2, A1_2)),
+  ok.
 
 receive_notify(Ref) ->
   receive

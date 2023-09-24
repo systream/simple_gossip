@@ -40,7 +40,8 @@
 new() ->
   #rumor{leader = node(),
          nodes = [node()],
-         gossip_version = 1}.
+         gossip_version = 1,
+         vector_clock = simple_gossip_vclock:new()}.
 
 -spec new(rumor()) -> rumor().
 new(#rumor{vector_clock = VectorClocks}) ->
@@ -61,18 +62,13 @@ change_gossip_interval(#rumor{} = Rumor, Interval) ->
 increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
   Rumor#rumor{gossip_version = GossipVersion+1}.
 
--spec increase_vector_clock(rumor(), node()) -> rumor().
-increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor, Node) ->
-  NewVectorClock = VectorClock#{Node => maps:get(node(), VectorClock, 0)+1},
-  Rumor#rumor{vector_clock = NewVectorClock}.
+-spec increase_vector_clock(rumor()) -> rumor().
+increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor) ->
+  Rumor#rumor{vector_clock = simple_gossip_vclock:increment(VectorClock)}.
 
 -spec increase_version(rumor()) -> rumor().
-increase_version(Rumor) ->
-  increase_version(Rumor, node()).
-
--spec increase_version(rumor(), node()) -> rumor().
-increase_version(#rumor{} = Rumor, Node) ->
-  increase_vector_clock(increase_gossip_version(Rumor), Node).
+increase_version(#rumor{} = Rumor) ->
+  increase_vector_clock(increase_gossip_version(Rumor)).
 
 -spec add_node(rumor(), node()) -> rumor().
 add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
@@ -110,7 +106,7 @@ check_node_exclude(#rumor{} = Rumor) ->
                 fun() ->
                   ?LOG_INFO("New rumor created because"
                             "the incoming rumor not contains the current node"),
-                  increase_vector_clock(new(Rumor), node())
+                  increase_vector_clock(new(Rumor))
                 end).
 
 -spec pick_random_nodes([node()], non_neg_integer()) -> [node()].
@@ -168,5 +164,4 @@ if_leader(Rumor, _, _Fun) ->
 -spec check_vector_clocks(In :: rumor(), Current :: rumor()) -> boolean().
 check_vector_clocks(#rumor{vector_clock = InVectorClocks},
                     #rumor{vector_clock = CurrentVectorClocks}) ->
-  Node = node(),
-  maps:get(Node, InVectorClocks, 0) >= maps:get(Node, CurrentVectorClocks, 0).
+  simple_gossip_vclock:descendant(InVectorClocks, CurrentVectorClocks).
