@@ -14,22 +14,21 @@
 
 %% API
 -export([new/0,
-         new/1,
-         add_node/2,
-         change_leader/1,
-         remove_node/2,
-         nodes/1,
-         pick_random_nodes/2,
-         check_node_exclude/1,
-         if_member/3,
-         if_not_member/3,
-         set_data/2,
-         data/1,
-         check_vector_clocks/2,
-         change_max_gossip_per_period/2,
-         change_gossip_interval/2,
-         calculate_new_leader/1,
-         calculate_new_leader/2]).
+  add_node/2,
+  change_leader/1,
+  remove_node/2,
+  nodes/1,
+  pick_random_nodes/2,
+  check_node_exclude/1,
+  if_member/3,
+  if_not_member/3,
+  set_data/2,
+  data/1,
+  descendant/2,
+  change_max_gossip_per_period/2,
+  change_gossip_interval/2,
+  calculate_new_leader/1,
+  calculate_new_leader/2, vsn/1, descendant_cluster/2, cluster_vsn/1]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
@@ -40,41 +39,30 @@
 new() ->
   #rumor{leader = node(),
          nodes = [node()],
-         gossip_version = 1,
-         vector_clock = simple_gossip_vclock:new()}.
-
--spec new(rumor()) -> rumor().
-new(#rumor{vector_clock = VectorClocks}) ->
-  #rumor{leader = node(),
-         nodes = [node()],
-         gossip_version = 1,
-         vector_clock = VectorClocks}.
+         cluster_vclock = simple_gossip_vclock:new(),
+         data_vclock = simple_gossip_vclock:new()}.
 
 -spec change_max_gossip_per_period(rumor(), pos_integer()) -> rumor().
 change_max_gossip_per_period(#rumor{} = Rumor, Period) ->
-  increase_version(Rumor#rumor{max_gossip_per_period = Period}).
+  increase_cluster_version(Rumor#rumor{max_gossip_per_period = Period}).
 
 -spec change_gossip_interval(rumor(), pos_integer()) -> rumor().
 change_gossip_interval(#rumor{} = Rumor, Interval) ->
-  increase_version(Rumor#rumor{gossip_period = Interval}).
-
--spec increase_gossip_version(rumor()) -> rumor().
-increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
-  Rumor#rumor{gossip_version = GossipVersion+1}.
-
--spec increase_vector_clock(rumor()) -> rumor().
-increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor) ->
-  Rumor#rumor{vector_clock = simple_gossip_vclock:increment(VectorClock)}.
+  increase_cluster_version(Rumor#rumor{gossip_period = Interval}).
 
 -spec increase_version(rumor()) -> rumor().
-increase_version(#rumor{} = Rumor) ->
-  increase_vector_clock(increase_gossip_version(Rumor)).
+increase_version(#rumor{data_vclock = VectorClock} = Rumor) ->
+  Rumor#rumor{data_vclock = simple_gossip_vclock:increment(VectorClock)}.
+
+-spec increase_cluster_version(rumor()) -> rumor().
+increase_cluster_version(#rumor{cluster_vclock = VectorClock} = Rumor) ->
+  Rumor#rumor{cluster_vclock = simple_gossip_vclock:increment(VectorClock)}.
 
 -spec add_node(rumor(), node()) -> rumor().
 add_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   if_not_member(Rumor, Node,
                 fun() ->
-                  increase_version(Rumor#rumor{nodes = [Node | Nodes]})
+                  increase_cluster_version(Rumor#rumor{nodes = [Node | Nodes]})
                 end
   ).
 
@@ -94,7 +82,7 @@ data(#rumor{data = Data}) ->
 remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   if_member(Rumor, Node,
             fun() ->
-              NewRumor = increase_version(
+              NewRumor = increase_cluster_version(
                 Rumor#rumor{nodes = lists:delete(Node, Nodes)}
               ),
               if_leader(NewRumor, Node, fun change_leader/1)
@@ -106,7 +94,7 @@ check_node_exclude(#rumor{} = Rumor) ->
                 fun() ->
                   ?LOG_INFO("New rumor created because"
                             "the incoming rumor not contains the current node"),
-                  increase_vector_clock(new(Rumor))
+                  increase_cluster_version(Rumor)
                 end).
 
 -spec pick_random_nodes([node()], non_neg_integer()) -> [node()].
@@ -124,7 +112,7 @@ pick_random_nodes(Nodes, Number, Acc) ->
 change_leader(#rumor{nodes = Nodes, leader = Leader} = Rumor)
   when Nodes =/= [] andalso Nodes =/= [Leader] ->
   NewLeader = calculate_new_leader(Rumor),
-  increase_version(Rumor#rumor{leader = NewLeader});
+  increase_cluster_version(Rumor#rumor{leader = NewLeader});
 change_leader(Rumor) ->
   Rumor.
 
@@ -161,7 +149,22 @@ if_leader(#rumor{leader = Leader} = Rumor, Leader, Fun) ->
 if_leader(Rumor, _, _Fun) ->
   Rumor.
 
--spec check_vector_clocks(In :: rumor(), Current :: rumor()) -> boolean().
-check_vector_clocks(#rumor{vector_clock = InVectorClocks},
-                    #rumor{vector_clock = CurrentVectorClocks}) ->
+-spec descendant(In :: rumor(), Current :: rumor()) -> boolean().
+descendant(#rumor{data_vclock = InVectorClocks},
+           #rumor{data_vclock = CurrentVectorClocks}) ->
   simple_gossip_vclock:descendant(InVectorClocks, CurrentVectorClocks).
+
+-spec descendant_cluster(In :: rumor(), Current :: rumor()) -> boolean().
+descendant_cluster(#rumor{cluster_vclock = InVectorClocks},
+                   #rumor{cluster_vclock = CurrentVectorClocks}) ->
+  simple_gossip_vclock:descendant(InVectorClocks, CurrentVectorClocks).
+
+-spec vsn(rumor()) -> non_neg_integer().
+vsn(#rumor{data_vclock = VectorClocks} = Rumor) ->
+  <<(integer_to_binary(cluster_vsn(Rumor)))/binary, ".",
+    (integer_to_binary(simple_gossip_vclock:vsn(VectorClocks)))/binary>>.
+
+-spec cluster_vsn(rumor()) -> non_neg_integer().
+cluster_vsn(#rumor{cluster_vclock = VectorClocks}) ->
+  simple_gossip_vclock:vsn(VectorClocks).
+

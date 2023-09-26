@@ -180,9 +180,9 @@ format_server_state(Pid) ->
   io:format("~n============================================================~n"),
   io:format("Node:        ~p~n", [node(Pid)]),
   io:format("Leader:      ~p~n", [Rumor#rumor.leader]),
-  io:format("GossipVsn:   ~p~n", [Rumor#rumor.gossip_version]),
+  %io:format("GossipVsn:   ~p~n", [Rumor#rumor.vclock]),
   io:format("Datahash:    ~p~n", [erlang:phash2(Rumor#rumor.data, 9999)]),
-  io:format("VectorClock: ~p~n", [Rumor#rumor.vector_clock]),
+  io:format("VectorClock: ~p~n", [Rumor#rumor.data_vclock]),
   io:format("Nodes:       ~p~n", [Rumor#rumor.nodes]).
 
 precondition_wait_to_reconcile(true, Node) ->

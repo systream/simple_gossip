@@ -6,8 +6,8 @@
 %%% @end
 %%%-------------------------------------------------------------------
 
--record(rumor, {gossip_version = 1 :: pos_integer(),
-                vector_clock = simple_gossip_vclock:vclock(),
+-record(rumor, {cluster_vclock = simple_gossip_vclock:vclock(),
+                data_vclock = simple_gossip_vclock:vclock(),
                 data :: any(),
                 leader :: node(),
                 nodes = [] :: [node()],

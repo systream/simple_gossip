@@ -89,7 +89,7 @@ set_gossip_interval(Interval) ->
 
 -spec get_gossip() -> {ok, rumor()}.
 get_gossip() ->
-  gen_server:call(?SERVER, whisper_your_gossip, 100).
+  gen_server:call(?SERVER, whisper_your_gossip, 1000).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -144,13 +144,16 @@ fetch_gossip(Nodes, StoredRumor) ->
   case simple_gossip_rumor:pick_random_nodes(Nodes, 1) of
     [Node] ->
       case catch rpc:call(Node, ?MODULE, get_gossip, []) of
-        {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
-          ?LOG_INFO("PreSync rumor from ~p gossip vsn: ~p", [Node, NewRumor#rumor.gossip_version]),
-          simple_gossip_rumor:check_node_exclude(NewRumor);
-        {ok, NewRumor} when NewRumor#rumor.gossip_version =< StoredRumor#rumor.gossip_version ->
-          ?LOG_INFO("Cannot get fresh gossip From ~p Reason: older gossip vsn ~p > ~p",
-                      [Node, NewRumor#rumor.gossip_version, StoredRumor#rumor.gossip_version]),
-          maybe_fetch_gossip(Nodes -- [Node], StoredRumor);
+        {ok, NewRumor} ->
+          case simple_gossip_rumor:descendant_cluster(NewRumor, StoredRumor) of
+            true ->
+              ?LOG_INFO("PreSync rumor from ~p gossip vsn: ~p", [Node, NewRumor#rumor.cluster_vclock]),
+              simple_gossip_rumor:check_node_exclude(NewRumor);
+            false ->
+              ?LOG_INFO("Cannot get fresh gossip From ~p Reason: older gossip vsn ~p > ~p",
+                [Node, NewRumor#rumor.cluster_vclock, StoredRumor#rumor.cluster_vclock]),
+              maybe_fetch_gossip(Nodes -- [Node], StoredRumor)
+          end;
         Else ->
           ?LOG_WARNING("Cannot get fresh gossip From ~p Reason: ~p", [Node, Else]),
           maybe_fetch_gossip(Nodes -- [Node], StoredRumor)
@@ -187,49 +190,49 @@ handle_call(get, _From, #state{rumor = Rumor} = State) ->
 handle_call({set, Data}, From, State) ->
   proxy_call({set, Data}, From, State);
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
-                                                gossip_version = Version,
-                                                leader = Leader}} = State) ->
+                                                leader = Leader} = Rumor} = State) ->
   spawn(fun() ->
           Ref = make_ref(),
           Self = self(),
           gen_server:abcast(Nodes, ?MODULE, {get_gossip_version, Self, Ref}),
-          Result = receive_gossip_version(Ref, Nodes, Version, Leader),
+          Result = receive_gossip_version(Ref, Nodes, simple_gossip_rumor:vsn(Rumor), Leader),
           gen_server:reply(From, Result)
         end),
   {noreply, State};
-handle_call({join_request, #rumor{gossip_version = InGossipVsn} = InRumor},
-            {FromPid, _},
-            #state{rumor = #rumor{gossip_version = CurrentGossipVsn}} = State)
-  when InGossipVsn >= CurrentGossipVsn ->
-  ?LOG_INFO(
-    "Join request from ~p. Remote rumor (~p) is greater than the current (~p)" ++
-    " applying it", [node(FromPid), InGossipVsn, CurrentGossipVsn]),
-  gossip(InRumor),
-  simple_gossip_event:notify(InRumor),
-  {reply, ok, reschedule_gossip(State#state{rumor = InRumor})};
-handle_call({join_request, #rumor{gossip_version = InGossipVsn}}, {FromPid, _},
-             #state{rumor = #rumor{gossip_version = CurrentGossipVsn} = Rumor} =
-              State) when InGossipVsn < CurrentGossipVsn ->
-  Node = node(FromPid),
-  NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
-  gossip(NewRumor, Node),
-  ?LOG_INFO(
-    "Join request from ~p. Current rumor (~p) is greater than the remote (~p)." ++
-    " Asking remote to upgrade", [Node, CurrentGossipVsn, InGossipVsn]),
-  simple_gossip_event:notify(NewRumor),
-  {reply, {upgrade, NewRumor}, reschedule_gossip(State#state{rumor = NewRumor})};
+handle_call({join_request, InRumor}, {FromPid, _}, #state{rumor = Rumor} = State) ->
+  case simple_gossip_rumor:descendant_cluster(InRumor, Rumor) of
+    true ->
+      ?LOG_INFO(
+        "Join request from ~p. Remote rumor (~p) is greater than the current (~p)" ++
+        " applying it", [node(FromPid),
+                         simple_gossip_rumor:cluster_vsn(InRumor),
+                         simple_gossip_rumor:cluster_vsn(Rumor)]),
+      gossip(InRumor),
+      simple_gossip_event:notify(InRumor),
+      {reply, ok, reschedule_gossip(State#state{rumor = InRumor})};
+    false ->
+      Node = node(FromPid),
+      NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
+      gossip(NewRumor, Node),
+      ?LOG_INFO(
+        "Join request from ~p. Current rumor (~p) is greater than the remote (~p)." ++
+        " Asking remote to upgrade", [Node, simple_gossip_rumor:cluster_vsn(InRumor),
+                                            simple_gossip_rumor:cluster_vsn(Rumor)]),
+      simple_gossip_event:notify(NewRumor),
+      {reply, {upgrade, NewRumor}, reschedule_gossip(State#state{rumor = NewRumor})}
+  end;
 
 handle_call(Command, From, State) ->
   proxy_call(Command, From, State).
 
 -spec(handle_command(Request :: term(), From :: {pid(), Tag :: term()},
-                  State :: state()) ->
-                   {reply, Reply :: term(), NewState :: state()} |
-                   {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
-                   {noreply, NewState :: state()} |
-                   {noreply, NewState :: state(), timeout() | hibernate} |
-                   {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
-                   {stop, Reason :: term(), NewState :: state()}).
+    State :: state()) ->
+  {reply, Reply :: term(), NewState :: state()} |
+  {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
+  {noreply, NewState :: state()} |
+  {noreply, NewState :: state(), timeout() | hibernate} |
+  {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
+  {stop, Reason :: term(), NewState :: state()}).
 handle_command({set, ChangeFun}, From, #state{rumor = Rumor} = State)
   when is_function(ChangeFun) ->
   case ChangeFun(simple_gossip_rumor:data(Rumor)) of
@@ -241,7 +244,7 @@ handle_command({set, ChangeFun}, From, #state{rumor = Rumor} = State)
 handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = simple_gossip_rumor:set_data(Rumor, Data),
   ?LOG_DEBUG("Set data: ~p vsn: ~p",
-             [erlang:phash2(Data, 9999), NewRumor#rumor.gossip_version]),
+    [erlang:phash2(Data, 9999), {NewRumor#rumor.cluster_vclock, NewRumor#rumor.data_vclock}]),
   gossip(NewRumor),
   simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
@@ -265,7 +268,7 @@ handle_command({leave, Node}, _From,
 
 % leader node leaves which is the current node
 handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumor} = State)
-  when Node == node() ->
+  when Node =:= node() ->
   ?LOG_INFO("Node ~p leaving. Leader: ~p", [Node, Node]),
   OthersRumor = simple_gossip_rumor:remove_node(Rumor, Node),
   gossip(OthersRumor),
@@ -322,12 +325,8 @@ handle_command(whisper_your_gossip, _From,
   {noreply, NewState :: state()} |
   {noreply, NewState :: state(), timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: state()}).
-handle_cast({reconcile,
-             #rumor{gossip_version = InVersion} = InRumor,
-             SenderNode},
-             #state{rumor = #rumor{gossip_version = Version} = CRumor} = State)
-  when InVersion > Version ->
-  case simple_gossip_rumor:check_vector_clocks(InRumor, CRumor) of
+handle_cast({reconcile, InRumor, SenderNode}, #state{rumor = CRumor} = State) ->
+  case simple_gossip_rumor:descendant(InRumor, CRumor) of
     true ->
       NewRumor1 = simple_gossip_rumor:check_node_exclude(InRumor),
       GossipNodes = lists:delete(SenderNode,
@@ -335,20 +334,20 @@ handle_cast({reconcile,
       gossip(NewRumor1, GossipNodes),
       simple_gossip_event:notify(NewRumor1),
       ?LOG_DEBUG("New gossip ~p From ~p",
-                [NewRumor1#rumor.gossip_version, SenderNode]),
+                [NewRumor1#rumor.data_vclock, SenderNode]),
       {noreply, State#state{rumor = NewRumor1}};
     _ ->
       ?LOG_WARNING("Dropped newer gossip due to vclock check", []),
       {noreply, State}
   end;
-handle_cast({reconcile, Rumor, SenderNode}, State) ->
-  ?LOG_DEBUG("Gossip ~p dropped due to lower version, From ~p",
-             [Rumor#rumor.gossip_version, SenderNode]),
-  {noreply, State};
+%handle_cast({reconcile, Rumor, SenderNode}, State) ->
+%  ?LOG_DEBUG("Gossip ~p dropped due to lower version, From ~p",
+%    [Rumor#rumor.gossip_version, SenderNode]),
+%  {noreply, State};
 
 handle_cast({get_gossip_version, Requester, Ref},
-            #state{rumor = #rumor{gossip_version = Vsn}} = State) ->
-  Requester ! {gossip_vsn, Vsn, Ref, node()},
+            #state{rumor = Rumor} = State) ->
+  Requester ! {gossip_vsn, simple_gossip_rumor:vsn(Rumor), Ref, node()},
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -502,9 +501,8 @@ join_node(Rumor, Node) ->
                                ?PROXY_CALL_TIMEOUT) of
     {ok, {upgrade, UpgradeRumor}} ->
       ?LOG_DEBUG("Rumor upgraded from remote ~p ~p",
-                              [Node, UpgradeRumor#rumor.gossip_version]),
+                              [Node, UpgradeRumor#rumor.cluster_vclock]),
       UpgradeRumor;
     _ ->
       NewRumor
   end.
-

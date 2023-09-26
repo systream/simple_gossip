@@ -258,8 +258,11 @@ sync_between_nodes(_Config) ->
   ?assertEqual("main2", simple_gossip:get()),
   ?assertEqual("main2", rpc:call(Node1, simple_gossip, get, [])),
 
+  ct:pal("leave: ~p~n", [simple_gossip_server:status()]),
   simple_gossip:leave(Node1),
+  ct:pal("leave: ~p~n", [simple_gossip_server:status()]),
   simple_gossip:leave(Node2),
+  ct:pal("leave: ~p~n", [simple_gossip_server:status()]),
 
   ct_slave:stop(Node1),
   ct_slave:stop(Node2).
@@ -366,6 +369,7 @@ get_nodes({error, _Reason, _Leader, Nodes}) ->
 
 start_from_persist_data(_Config) ->
   simple_gossip:set("from file test"),
+  simple_gossip_test_tools:wait_to_reconcile(),
   [ok = simple_gossip:leave(Node) || Node <- nodes()],
   simple_gossip_test_tools:stop_cluster(),
   application:stop(simple_gossip),
@@ -384,6 +388,7 @@ serve_persist_from_memory(_Config) ->
 
 vclock(_Config) ->
   A = simple_gossip_vclock:new(),
+  ?assertEqual(0, simple_gossip_vclock:vsn(A)),
   B = simple_gossip_vclock:new(),
   ?assert(simple_gossip_vclock:descendant(A, B)),
   ?assert(simple_gossip_vclock:descendant(B, A)),
@@ -397,6 +402,14 @@ vclock(_Config) ->
   ?assert(simple_gossip_vclock:descendant(A2, A1_1)),
   ?assert(simple_gossip_vclock:descendant(A2, A)),
   ?assertNot(simple_gossip_vclock:descendant(A2, A1_2)),
+  ?assertEqual(2, simple_gossip_vclock:vsn(A2)),
+
+  Shrink = lists:foldl(fun(I, Vc) ->
+                  simple_gossip_vclock:increment(Vc, I rem 5)
+                end, simple_gossip_vclock:new(), lists:seq(1, 199)),
+  application:set_env(simple_gossip, shrink_time_threshold, 10),
+  timer:sleep(10),
+  ?assert(byte_size(term_to_binary(simple_gossip_vclock:increment(Shrink))) < byte_size(term_to_binary(Shrink))),
   ok.
 
 receive_notify(Ref) ->
