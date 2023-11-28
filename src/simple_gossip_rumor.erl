@@ -14,22 +14,23 @@
 
 %% API
 -export([new/0,
-         new/1,
-         add_node/2,
-         change_leader/1,
-         remove_node/2,
-         nodes/1,
-         pick_random_nodes/2,
-         check_node_exclude/1,
-         if_member/3,
-         if_not_member/3,
-         set_data/2,
-         data/1,
-         check_vector_clocks/2,
-         change_max_gossip_per_period/2,
-         change_gossip_interval/2,
-         calculate_new_leader/1,
-         calculate_new_leader/2]).
+  new/1,
+  head/1,
+  add_node/2,
+  change_leader/1,
+  remove_node/2,
+  nodes/1,
+  pick_random_nodes/2,
+  check_node_exclude/1,
+  if_member/3,
+  if_not_member/3,
+  set_data/2,
+  data/1,
+  check_vector_clocks/2,
+  change_max_gossip_per_period/2,
+  change_gossip_interval/2,
+  calculate_new_leader/1,
+  calculate_new_leader/2, version/1]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
@@ -49,6 +50,10 @@ new(#rumor{vector_clock = VectorClocks}) ->
          nodes = [node()],
          gossip_version = 1,
          vector_clock = VectorClocks}.
+
+-spec head(rumor()) -> rumor_head().
+head(#rumor{gossip_version = GossipVersion, vector_clock = VectorClock}) ->
+  #rumor_head{gossip_version = GossipVersion, vector_clock = VectorClock}.
 
 -spec change_max_gossip_per_period(rumor(), pos_integer()) -> rumor().
 change_max_gossip_per_period(#rumor{} = Rumor, Period) ->
@@ -89,6 +94,12 @@ set_data(#rumor{} = Rumor, Data) ->
 -spec data(rumor()) -> term().
 data(#rumor{data = Data}) ->
   Data.
+
+-spec version(rumor_head() | rumor()) -> pos_integer().
+version(#rumor{gossip_version = Version}) ->
+  Version;
+version(#rumor_head{gossip_version = Version}) ->
+  Version.
 
 -spec remove_node(rumor(), node()) -> rumor().
 remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->

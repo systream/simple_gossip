@@ -11,9 +11,14 @@
                 data :: any(),
                 leader :: node(),
                 nodes = [] :: [node()],
-                max_gossip_per_period = 3 :: pos_integer(),
+                max_gossip_per_period = 1 :: pos_integer(),
                 gossip_period = 15000 :: pos_integer()
 }).
 
+-record(rumor_head, {gossip_version = 1 :: pos_integer(),
+                     vector_clock = simple_gossip_vclock:vclock()
+}).
+
 -type rumor() :: #rumor{}.
+-type rumor_head() :: #rumor_head{}.
 -export_type([rumor/0]).

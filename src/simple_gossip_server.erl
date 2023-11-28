@@ -218,6 +218,9 @@ handle_call({join_request, #rumor{gossip_version = InGossipVsn}}, {FromPid, _},
     " Asking remote to upgrade", [Node, CurrentGossipVsn, InGossipVsn]),
   simple_gossip_event:notify(NewRumor),
   {reply, {upgrade, NewRumor}, reschedule_gossip(State#state{rumor = NewRumor})};
+handle_call(reconcile, {FromPid, _FromRef}, #state{rumor = Rumor} = State) ->
+  gossip(Rumor, node(FromPid)),
+  {reply, ok, State};
 
 handle_call(Command, From, State) ->
   proxy_call(Command, From, State).
@@ -322,6 +325,11 @@ handle_command(whisper_your_gossip, _From,
   {noreply, NewState :: state()} |
   {noreply, NewState :: state(), timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: state()}).
+handle_cast({reconcile, #rumor_head{gossip_version = InVersion}, SenderNode},
+             #state{rumor = #rumor{gossip_version = Version}} = State)
+  when InVersion > Version ->
+  gen_server:call({?SERVER, SenderNode}, reconcile),
+  {noreply, State};
 handle_cast({reconcile,
              #rumor{gossip_version = InVersion} = InRumor,
              SenderNode},
@@ -341,9 +349,14 @@ handle_cast({reconcile,
       ?LOG_WARNING("Dropped newer gossip due to vclock check", []),
       {noreply, State}
   end;
-handle_cast({reconcile, Rumor, SenderNode}, State) ->
+handle_cast({reconcile, #rumor_head{gossip_version = InVersion}, _SenderNode},
+            #state{rumor = #rumor{gossip_version = Version}} = State)
+  when InVersion =:= Version ->
+  {noreply, State};
+handle_cast({reconcile, InRumor, SenderNode}, #state{rumor = Rumor} = State) ->
   ?LOG_DEBUG("Gossip ~p dropped due to lower version, From ~p",
-             [Rumor#rumor.gossip_version, SenderNode]),
+             [simple_gossip_rumor:version(InRumor), SenderNode]),
+  gossip(Rumor, SenderNode),
   {noreply, State};
 
 handle_cast({get_gossip_version, Requester, Ref},
@@ -403,7 +416,10 @@ gossip_random_node(#rumor{nodes = []}) ->
   ok;
 gossip_random_node(Rumor) ->
   NewNodes = remove_current_node(simple_gossip_rumor:nodes(Rumor)),
-  gossip(Rumor, simple_gossip_rumor:pick_random_nodes(NewNodes, 1)).
+  case simple_gossip_rumor:pick_random_nodes(NewNodes, 1) of
+    [] -> ok;
+    [Node] -> gossip_head(Rumor, Node)
+  end.
 
 -spec remove_current_node([node()]) -> [node()].
 remove_current_node(Nodes) ->
@@ -416,6 +432,10 @@ gossip(#rumor{max_gossip_per_period = Max} = Rumor, Nodes) when is_list(Nodes) -
   ok;
 gossip(Rumor, Node) ->
   gen_server:cast({?MODULE, Node}, {reconcile, Rumor, node()}).
+
+-spec gossip_head(rumor(), node()) -> ok.
+gossip_head(Rumor, Node) ->
+  gen_server:cast({?MODULE, Node}, {reconcile, simple_gossip_rumor:head(Rumor), node()}).
 
 -spec schedule_gossip(rumor()) -> reference().
 schedule_gossip(#rumor{gossip_period = Period}) ->
