@@ -89,7 +89,7 @@ set_gossip_interval(Interval) ->
 
 -spec get_gossip() -> {ok, rumor()}.
 get_gossip() ->
-  gen_server:call(?SERVER, whisper_your_gossip, 100).
+  gen_server:call(?SERVER, whisper_your_gossip, 1000).
 
 %%--------------------------------------------------------------------
 %% @doc
