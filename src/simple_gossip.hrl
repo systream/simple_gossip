@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 
 -record(rumor, {gossip_version = 1 :: pos_integer(),
-                vector_clock = simple_gossip_vclock:vclock(),
+                vector_clock :: simple_gossip_vclock:vclock(),
                 data :: any(),
                 leader :: node(),
                 nodes = [] :: [node()],

@@ -65,7 +65,7 @@ change_gossip_interval(#rumor{} = Rumor, Interval) ->
 
 -spec increase_gossip_version(rumor()) -> rumor().
 increase_gossip_version(#rumor{gossip_version = GossipVersion} = Rumor) ->
-  Rumor#rumor{gossip_version = GossipVersion+1}.
+  Rumor#rumor{gossip_version = GossipVersion + 1}.
 
 -spec increase_vector_clock(rumor()) -> rumor().
 increase_vector_clock(#rumor{vector_clock = VectorClock} = Rumor) ->

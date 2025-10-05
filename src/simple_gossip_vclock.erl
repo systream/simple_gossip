@@ -30,7 +30,7 @@ increment(VClock, Node) ->
 increment(VClock, Node, Timestamp) ->
   case maps:get(Node, VClock, not_found) of
     not_found -> VClock#{Node => {1, Timestamp}};
-    {Counter, _OldTs} -> VClock#{Node => {Counter+1, Timestamp}}
+    {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}}
   end.
 
 -spec descendant(vclock(), vclock() | none | {node(), {pos_integer(), pos_integer()}, term()}) ->

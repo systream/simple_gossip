@@ -139,7 +139,7 @@ handle_info({rumor_changed, Rumor}, #state{iteration = Iteration} = State) when
   {noreply, save(State#state{pending_data = Rumor})};
 handle_info({rumor_changed, Rumor}, #state{iteration = Iteration} = State) ->
   {noreply,
-   State#state{pending_data = Rumor, iteration = Iteration+1},
+   State#state{pending_data = Rumor, iteration = Iteration + 1},
    ?SAVE_INTERVAL};
 handle_info(timeout, State) ->
   {noreply, save(State)}.
