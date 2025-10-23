@@ -8,7 +8,7 @@
 -module(simple_gossip_vclock).
 
 %% API
--export([new/0, increment/1, descendant/2, increment/2]).
+-export([new/0, increment/1, descendant/2, increment/2, clean/2]).
 
 -type vclock() :: map().
 
@@ -28,8 +28,8 @@ increment(VClock, Node) ->
 
 -spec increment(vclock(), node(), pos_integer()) -> vclock().
 increment(VClock, Node, Timestamp) ->
-  case maps:get(Node, VClock, not_found) of
-    not_found -> VClock#{Node => {1, Timestamp}};
+  case maps:get(Node, VClock, deleted) of
+    deleted -> VClock#{Node => {1, Timestamp}};
     {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}}
   end.
 
@@ -42,9 +42,13 @@ descendant(VClockA, {Node, {CounterB, TSB}, Iterator}) ->
       descendant(VClockA, maps:next(Iterator));
     {CounterA, TSA} when CounterA =:= CounterB andalso TSA =:= TSB ->
       descendant(VClockA, maps:next(Iterator));
+    deleted ->
+      descendant(VClockA, maps:next(Iterator));
     _ ->
       false
   end;
+descendant(VClockA, {_Node, deleted, Iterator}) ->
+  descendant(VClockA, maps:next(Iterator));
 descendant(_VClockA, none) ->
   true;
 descendant(VClockA, VClockB) when is_map(VClockB) ->
@@ -53,3 +57,17 @@ descendant(VClockA, VClockB) when is_map(VClockB) ->
 -spec timestamp() -> pos_integer().
 timestamp() ->
   erlang:system_time(nanosecond).
+
+-spec clean(vclock(), [node()]) -> vclock().
+clean(VClock, NodesList) ->
+  % We need to leave a deleted vclock as a thumb stone, at least for one round
+  maps:fold(fun(_VClockNode, deleted, VClockAcc) ->
+      VClockAcc;
+    (VClockNode, Value, VClockAcc) ->
+      case lists:member(VClockNode, NodesList) of
+        true ->
+          VClockAcc#{VClockNode => deleted};
+        _ ->
+          VClockAcc#{VClockNode => Value}
+      end
+    end, #{}, VClock).

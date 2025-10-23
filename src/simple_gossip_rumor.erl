@@ -46,10 +46,12 @@ new() ->
 
 -spec new(rumor()) -> rumor().
 new(#rumor{vector_clock = VectorClocks}) ->
+  Nodes = [node()],
+  NewVectorClocks = simple_gossip_vclock:clean(VectorClocks, Nodes),
   #rumor{leader = node(),
-         nodes = [node()],
+         nodes = Nodes,
          gossip_version = 1,
-         vector_clock = VectorClocks}.
+         vector_clock = NewVectorClocks}.
 
 -spec head(rumor()) -> rumor_head().
 head(#rumor{gossip_version = GossipVersion, vector_clock = VectorClock}) ->
@@ -102,11 +104,14 @@ version(#rumor_head{gossip_version = Version}) ->
   Version.
 
 -spec remove_node(rumor(), node()) -> rumor().
-remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
+remove_node(#rumor{nodes = Nodes, vector_clock = Vc} = Rumor, Node) ->
   if_member(Rumor, Node,
             fun() ->
+              NewNodes = lists:delete(Node, Nodes),
               NewRumor = increase_version(
-                Rumor#rumor{nodes = lists:delete(Node, Nodes)}
+                Rumor#rumor{nodes = NewNodes,
+                                           vector_clock = simple_gossip_vclock:clean(Vc, NewNodes)
+                }
               ),
               if_leader(NewRumor, Node, fun change_leader/1)
             end).
