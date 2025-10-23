@@ -272,7 +272,7 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   ?LOG_INFO("Node ~p leaving. Leader: ~p", [Node, Node]),
   OthersRumor = simple_gossip_rumor:remove_node(Rumor, Node),
   gossip(OthersRumor),
-  MyRumor = simple_gossip_rumor:new(),
+  MyRumor = simple_gossip_rumor:new(Rumor),
   simple_gossip_event:notify(MyRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = MyRumor})};
 
@@ -346,7 +346,7 @@ handle_cast({reconcile,
                 [NewRumor1#rumor.gossip_version, SenderNode]),
       {noreply, State#state{rumor = NewRumor1}};
     _ ->
-      ?LOG_WARNING("Dropped newer gossip due to vclock check", []),
+      ?LOG_WARNING("Dropped newer gossip (~p) due to vclock check", [InVersion]),
       {noreply, State}
   end;
 handle_cast({reconcile, #rumor_head{gossip_version = InVersion}, _SenderNode},

@@ -29,8 +29,9 @@ increment(VClock, Node) ->
 -spec increment(vclock(), node(), pos_integer()) -> vclock().
 increment(VClock, Node, Timestamp) ->
   case maps:get(Node, VClock, deleted) of
+    {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}};
     deleted -> VClock#{Node => {1, Timestamp}};
-    {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}}
+    {Counter, _OldTs, deleted} -> VClock#{Node => {Counter + 1, Timestamp}}
   end.
 
 -spec descendant(vclock(), vclock() | none | {node(), {pos_integer(), pos_integer()}, term()}) ->
@@ -42,12 +43,12 @@ descendant(VClockA, {Node, {CounterB, TSB}, Iterator}) ->
       descendant(VClockA, maps:next(Iterator));
     {CounterA, TSA} when CounterA =:= CounterB andalso TSA =:= TSB ->
       descendant(VClockA, maps:next(Iterator));
-    deleted ->
+    {_CounterA, _TSA, deleted} ->
       descendant(VClockA, maps:next(Iterator));
     _ ->
       false
   end;
-descendant(VClockA, {_Node, deleted, Iterator}) ->
+descendant(VClockA, {_Node, {_CounterB, _TSB, deleted}, Iterator}) ->
   descendant(VClockA, maps:next(Iterator));
 descendant(_VClockA, none) ->
   true;
@@ -60,14 +61,16 @@ timestamp() ->
 
 -spec clean(vclock(), [node()]) -> vclock().
 clean(VClock, NodesList) ->
-  % We need to leave a deleted vclock as a thumb stone, at least for one round
-  maps:fold(fun(_VClockNode, deleted, VClockAcc) ->
-      VClockAcc;
-    (VClockNode, Value, VClockAcc) ->
+  DropNodesAfter = timestamp() - 300_000_000_000, % 5 minutes
+  % We need to leave a deleted vclock as a thumb stone, at least some time
+  maps:fold(fun(VClockNode, {Counter, TS, deleted}, VClockAcc) ->
+    case TS > DropNodesAfter of
+      true -> VClockAcc;
+      _ -> VClockAcc#{VClockNode => {Counter, TS, deleted}}
+    end;
+    (VClockNode, {Counter, TS}, VClockAcc) ->
       case lists:member(VClockNode, NodesList) of
-        true ->
-          VClockAcc#{VClockNode => deleted};
-        _ ->
-          VClockAcc#{VClockNode => Value}
+        true -> VClockAcc#{VClockNode => {Counter, TS, deleted}};
+        _ -> VClockAcc#{VClockNode => {Counter, TS}}
       end
     end, #{}, VClock).
