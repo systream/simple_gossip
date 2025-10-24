@@ -38,18 +38,13 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec notify(rumor()) -> ok | timeout.
+-spec notify(rumor()) -> ok.
 notify(Rumor) ->
   case get_mode() of
     async ->
-      gen_server:cast(?SERVER, {notify, Rumor});
+      ok = gen_server:cast(?SERVER, {notify, Rumor});
     sync ->
-      case simple_gossip_call:call(?SERVER, {notify, Rumor}, 4000) of
-        {ok, ok} ->
-          ok;
-        Else ->
-          Else
-      end
+      ok = gen_server:call(?SERVER, {notify, Rumor})
   end.
 
 -spec subscribe(pid()) -> ok.

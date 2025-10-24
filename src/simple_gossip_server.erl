@@ -13,7 +13,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 -define(STATUS_RECEIVE_TIMEOUT, 1024).
--define(PROXY_CALL_TIMEOUT, 2000).
+-define(PROXY_CALL_TIMEOUT, 3000).
 
 %% API
 -export([start_link/0,
@@ -488,17 +488,17 @@ proxy_call(Command, From,
            #state{rumor = #rumor{leader = Leader} = Rumor} = State,
            DownNodes) when Leader =/= node() ->
     case call(Leader, Command) of
-      {ok, {'EXIT', {Error, _}}} when {nodedown, Leader} == Error orelse
-                                      noproc == Error ->
+      {'EXIT', {Error, _}} when {nodedown, Leader} == Error orelse
+                                 noproc == Error ->
         ?LOG_DEBUG("Proxy call nodedown ~p", [Leader]),
         NewDownNodes = [Leader | DownNodes],
         NewLeader = simple_gossip_rumor:calculate_new_leader(Rumor, NewDownNodes),
         NewRumor = Rumor#rumor{leader = NewLeader},
         proxy_call(Command, From, State#state{rumor = NewRumor}, NewDownNodes);
-      {ok, Else} ->
-        {reply, Else, State};
-      timeout ->
-        {reply, timeout, State}
+      {'EXIT', {timeout, _}} ->
+        {reply, timeout, State};
+      Else ->
+        {reply, Else, State}
     end;
 proxy_call(Command, From, State, _DownNodes) ->
   handle_command(Command, From, State).
@@ -507,8 +507,8 @@ call(Leader, Command) ->
   call(Leader, Command, 1).
 
 call(Leader, Command, Retry) ->
-  case simple_gossip_call:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
-    {ok, {'EXIT', {Error, _}}}
+  case catch gen_server:call({?MODULE, Leader}, Command, ?PROXY_CALL_TIMEOUT) of
+    {'EXIT', {Error, _}}
       when ({nodedown, Leader} == Error orelse noproc == Error) andalso Retry >= 1 ->
       call(Leader, Command, Retry - 1);
     Else ->
@@ -518,13 +518,15 @@ call(Leader, Command, Retry) ->
 -spec join_node(rumor(), node()) -> rumor().
 join_node(Rumor, Node) ->
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
-  case simple_gossip_call:call({?MODULE, Node}, {join_request, NewRumor},
+  case gen_server:call({?MODULE, Node}, {join_request, NewRumor},
                                ?PROXY_CALL_TIMEOUT) of
-    {ok, {upgrade, UpgradeRumor}} ->
+    {upgrade, UpgradeRumor} ->
       ?LOG_DEBUG("Rumor upgraded from remote ~p ~p",
                               [Node, UpgradeRumor#rumor.gossip_version]),
       UpgradeRumor;
-    _ ->
+    JoinResult ->
+      ?LOG_WARNING("Rumor not upgraded from remote ~p because of ~p",
+        [Node, JoinResult]),
       NewRumor
   end.
 
