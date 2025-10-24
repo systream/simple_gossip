@@ -172,10 +172,10 @@ subscribe_loop(Data, MaxIteration) ->
   end.
 
 dump_server_states(Nodes) ->
-  {Pids, []} = rpc:multicall(Nodes, erlang, whereis, [simple_gossip_server]),
+  {Pids, _} = rpc:multicall(Nodes, erlang, whereis, [simple_gossip_server]),
   [format_server_state(Pid) || Pid <- Pids].
 
-format_server_state(Pid) ->
+format_server_state(Pid) when is_pid(Pid) ->
   {state, Rumor, _, _} = sys:get_state(Pid),
   io:format("~n============================================================~n"),
   io:format("Node:        ~p~n", [node(Pid)]),
@@ -183,7 +183,10 @@ format_server_state(Pid) ->
   io:format("GossipVsn:   ~p~n", [Rumor#rumor.gossip_version]),
   io:format("Datahash:    ~p~n", [erlang:phash2(Rumor#rumor.data, 9999)]),
   io:format("VectorClock: ~p~n", [Rumor#rumor.vector_clock]),
-  io:format("Nodes:       ~p~n", [Rumor#rumor.nodes]).
+  io:format("Nodes:       ~p~n", [Rumor#rumor.nodes]);
+format_server_state(undefined) ->
+  io:format("~n============================================================~n"),
+  io:format("Gossip server not running, pid is undefined~n", []).
 
 precondition_wait_to_reconcile(true, Node) ->
   simple_gossip_test_tools:wait_to_reconcile(Node, 10),

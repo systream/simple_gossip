@@ -524,9 +524,7 @@ join_node(Rumor, Node) ->
       ?LOG_DEBUG("Rumor upgraded from remote ~p ~p",
                               [Node, UpgradeRumor#rumor.gossip_version]),
       UpgradeRumor;
-    JoinResult ->
-      ?LOG_WARNING("Rumor not upgraded from remote ~p because of ~p",
-        [Node, JoinResult]),
+    ok ->
       NewRumor
   end.
 

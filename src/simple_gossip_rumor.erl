@@ -104,16 +104,16 @@ version(#rumor_head{gossip_version = Version}) ->
   Version.
 
 -spec remove_node(rumor(), node()) -> rumor().
-remove_node(#rumor{nodes = Nodes, vector_clock = Vc} = Rumor, Node) ->
+remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
   if_member(Rumor, Node,
             fun() ->
               NewNodes = lists:delete(Node, Nodes),
-              NewRumor = increase_version(
-                Rumor#rumor{nodes = NewNodes,
-                                           vector_clock = simple_gossip_vclock:clean(Vc, NewNodes)
-                }
-              ),
-              if_leader(NewRumor, Node, fun change_leader/1)
+              NewRumor = increase_version(Rumor#rumor{nodes = NewNodes}),
+              #rumor{vector_clock = VC} = NewRumor2 =
+                if_leader(NewRumor, Node, fun change_leader/1),
+              % increase version will also increase the vector clock to this node and
+              % we need to mark the current one as deleted, so that is the reason why it's cleaned after
+              NewRumor2#rumor{vector_clock = simple_gossip_vclock:clean(VC, NewNodes)}
             end).
 
 -spec check_node_exclude(rumor()) -> rumor().
