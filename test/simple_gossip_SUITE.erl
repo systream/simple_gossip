@@ -407,6 +407,7 @@ cfg(_Config) ->
   simple_gossip:set(bar, init),
   ?assertEqual(init, simple_gossip:get(bar, default)),
 
+  simple_gossip:set(undefined), % clear data
   ?assertEqual(bar, simple_gossip:get(foo, bar)),
   ok = simple_gossip:set(foo, bar2),
   ?assertEqual(bar2, simple_gossip:get(foo, bar)),

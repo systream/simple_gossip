@@ -37,7 +37,7 @@ get(Key, Default) ->
         #{Key := Value} = Data ->
           persist(Data),
           Value;
-        Data when is_map(Data) ->
+        Data when is_map(Data) orelse Data =:= undefined ->
           Default
       end;
     Value ->
