@@ -33,7 +33,8 @@
     subscribers = #{} :: #{pid() := {data | rumor, reference()}}
 }).
 
--type state() :: #state{}.
+-opaque state() :: #state{}.
+-export_type([state/0, rumor/0]).
 
 %%%===================================================================
 %%% API

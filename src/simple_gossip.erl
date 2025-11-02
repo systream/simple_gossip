@@ -11,6 +11,8 @@
 %% API
 -export([set/1, get/0, join/1, leave/1, status/0, subscribe/1, unsubscribe/1]).
 
+-export([set/2, get/2]).
+
 -export([subscribe/2]).
 
 -type set_fun() :: fun((term()) -> {change, term()} | no_change).
@@ -27,6 +29,14 @@ set(Data) ->
 -spec get() -> term().
 get() ->
   simple_gossip_server:get().
+
+-spec set(term(), term()) -> ok.
+set(Key, Value) ->
+  simple_gossip_cfg:set(Key, Value).
+
+-spec get(term(), term()) -> term().
+get(Key, Default) ->
+  simple_gossip_cfg:get(Key, Default).
 
 %% @doc Subscribe to data changes
 -spec subscribe(pid()) -> ok.

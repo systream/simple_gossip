@@ -35,7 +35,7 @@
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
 
--export_type([manage_node_fun/0]).
+-export_type([manage_node_fun/0, rumor/0, rumor_head/0]).
 
 -spec new() -> rumor().
 new() ->
@@ -112,7 +112,8 @@ remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
               #rumor{vector_clock = VC} = NewRumor2 =
                 if_leader(NewRumor, Node, fun change_leader/1),
               % increase version will also increase the vector clock to this node and
-              % we need to mark the current one as deleted, so that is the reason why it's cleaned after
+              % we need to mark the current one as deleted,
+              % so that is the reason why it's cleaned after
               NewRumor2#rumor{vector_clock = simple_gossip_vclock:clean(VC, NewNodes)}
             end).
 

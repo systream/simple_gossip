@@ -121,7 +121,8 @@ all() ->
     stop_leader_node,
     start_from_persist_data,
     serve_persist_from_memory,
-    vclock
+    vclock,
+    cfg
   ].
 
 %%--------------------------------------------------------------------
@@ -397,6 +398,29 @@ vclock(_Config) ->
   ?assert(simple_gossip_vclock:descendant(A2, A1_1)),
   ?assert(simple_gossip_vclock:descendant(A2, A)),
   ?assertNot(simple_gossip_vclock:descendant(A2, A1_2)),
+  ok.
+
+cfg(_Config) ->
+  simple_gossip:set(undefined), % clear data
+
+  % set new data to convert undefined to map
+  simple_gossip:set(bar, init),
+  ?assertEqual(init, simple_gossip:get(bar, default)),
+
+  ?assertEqual(bar, simple_gossip:get(foo, bar)),
+  ok = simple_gossip:set(foo, bar2),
+  ?assertEqual(bar2, simple_gossip:get(foo, bar)),
+  ct:sleep(100),
+  ?assertEqual(bar2, simple_gossip:get(foo, bar)),
+  simple_gossip:set(foo, bar3),
+  ?assertEqual(bar3, simple_gossip:get(foo, bar)),
+
+  simple_gossip_cfg:clear_store(),
+  ?assertEqual(bar3, simple_gossip:get(foo, bar)),
+
+  % cover
+  gen_server:cast(simple_gossip_cfg, test),
+  gen_server:call(simple_gossip_cfg, test),
   ok.
 
 receive_notify(Ref) ->

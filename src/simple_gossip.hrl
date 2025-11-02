@@ -21,4 +21,3 @@
 
 -type rumor() :: #rumor{}.
 -type rumor_head() :: #rumor_head{}.
--export_type([rumor/0]).

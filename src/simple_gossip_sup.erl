@@ -42,5 +42,12 @@ init([]) ->
         shutdown => 5000,
         modules => [simple_gossip_server]},
 
-    ChildSpecs = [EventServer, RumorStoreServer, Service],
+    Cfg =
+      #{id => simple_gossip_cfg,
+        start => {simple_gossip_cfg, start_link, []},
+        restart => permanent,
+        shutdown => 5000,
+        modules => [simple_gossip_cfg]},
+
+    ChildSpecs = [EventServer, RumorStoreServer, Service, Cfg],
     {ok, {SupFlags, ChildSpecs}}.

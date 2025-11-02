@@ -25,6 +25,16 @@ ok = simple_gossip:set(fun({Text, Counter}) ->
 {<<"hello world">>, 0} = simple_gossip:get().
 ```
 
+## config mode
+Have a key-value "storage" over simple gossip. 
+A map is being saved, and subscribed for data changes, and store key value pairs into persistent term.
+
+```erlang
+<<"default_value">> = simple_gossip:get_cfg(key, <<"default_value">>),
+ok = simple_gossip:set_cfg(key, some_random_value),
+some_random_value = simple_gossip:get_cfg(key, <<"default_value">>).
+```
+
 ### Get cluster state. 
 ```erlang
 simple_gossip:status().

@@ -47,7 +47,8 @@
                 timer_ref :: reference() | undefined
 }).
 
--type state() :: #state{}.
+-opaque state() :: #state{}.
+-export_type([state/0, rumor/0, set_fun/0]).
 
 -type set_fun() ::  fun((term()) -> {change, term()} | no_change).
 

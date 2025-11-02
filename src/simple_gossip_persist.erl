@@ -34,7 +34,8 @@
     iteration = 0 :: non_neg_integer()}
 ).
 
--type state() :: #state{}.
+-opaque state() :: #state{}.
+-export_type([state/0, rumor/0]).
 
 %%%===================================================================
 %%% API
@@ -142,7 +143,7 @@ handle_info({rumor_changed, Rumor}, #state{iteration = Iteration} = State) ->
    State#state{pending_data = Rumor, iteration = Iteration + 1},
    ?SAVE_INTERVAL};
 handle_info(timeout, State) ->
-  {noreply, save(State)}.
+  {noreply, save(State), hibernate}.
 
 -spec terminate((normal | shutdown | {shutdown, term()} | term()), state()) -> ok.
 terminate(_, State) ->
