@@ -196,6 +196,18 @@ get_mode() ->
 
 -spec check_mode() -> ok.
 check_mode() ->
+  CurrentMode = get_mode(),
+  case application:get_env(simple_gossip, event_mode, auto) of
+    auto ->
+      maybe_set_mode();
+    Mode when Mode =:= CurrentMode ->
+      ok;
+    Mode ->
+      set_mode(Mode)
+  end.
+
+-spec maybe_set_mode() -> ok.
+maybe_set_mode() ->
   {message_queue_len, MsgQueueLen} =
     erlang:process_info(self(), message_queue_len),
   case get_mode() of

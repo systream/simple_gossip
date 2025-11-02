@@ -157,6 +157,7 @@ set_get_via_fun_no_change(_Config) ->
 
 notify_change(_Config) ->
   application:ensure_all_started(simple_gossip),
+  application:set_env(simple_gossip, event_mode, sync),
   Ref = make_ref(),
   ok = simple_gossip:subscribe(self()),
   ok = simple_gossip:subscribe(self()), % check double subscribe -> should no effect
@@ -169,6 +170,8 @@ notify_change(_Config) ->
   simple_gossip:set({"new2", Ref2}),
   ?assertMatch(timeout, receive_notify(Ref)),
   simple_gossip:unsubscribe(self()),
+
+  application:set_env(simple_gossip, event_mode, auto),
 
   simple_gossip:subscribe(self(), rumor),
   simple_gossip:set(test),
