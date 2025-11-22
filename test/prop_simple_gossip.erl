@@ -92,8 +92,9 @@ prop_cluster_stop_leader() ->
     {term(), oneof(AvailableNodes), oneof(AvailableNodes)},
     begin
       Result = rpc:call(Node, simple_gossip, set, [Payload]),
-      %simple_gossip_test_tools:wait_to_reconcile(Node, 100),
-      Result == ok andalso Payload == rpc:call(GetNode, simple_gossip, get, [])
+      simple_gossip_test_tools:wait_to_reconcile(Node, 100),
+      GNPayload = rpc:call(GetNode, simple_gossip, get, []),
+      Result =:= ok andalso Payload =:= GNPayload
     end).
 
 prop_cluster_kill_leader() ->

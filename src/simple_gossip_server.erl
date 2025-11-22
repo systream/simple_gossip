@@ -57,7 +57,8 @@
 %%%===================================================================
 -spec set(term() | set_fun()) -> ok.
 set(Data) ->
-  gen_server:call(?SERVER, {set, Data}).
+  {ok, _} = gen_server:call(?SERVER, {set, Data}),
+  ok.
 
 -spec get() -> term().
 get() ->
@@ -186,7 +187,13 @@ maybe_fetch_gossip(NewNodes, StoredRumor) ->
 handle_call(get, _From, #state{rumor = Rumor} = State) ->
   {reply, simple_gossip_rumor:data(Rumor), State};
 handle_call({set, Data}, From, State) ->
-  proxy_call({set, Data}, From, State);
+  case proxy_call({set, Data}, From, State) of
+    {Leader, {reply, {ok, Rumor}, State}} -> % Let's update the rumor locally too
+      {noreply, NewState} = handle_cast({reconcile, Rumor, Leader}, State),
+      {reply, {ok, Rumor}, NewState};
+    {_Leader, Else} ->
+      Else
+  end;
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
                                                 gossip_version = Version,
                                                 leader = Leader}} = State) ->
@@ -224,7 +231,8 @@ handle_call(reconcile, {FromPid, _FromRef}, #state{rumor = Rumor} = State) ->
   {reply, ok, State};
 
 handle_call(Command, From, State) ->
-  proxy_call(Command, From, State).
+  {_Leader, Result} = proxy_call(Command, From, State),
+  Result.
 
 -spec(handle_command(Request :: term(), From :: {pid(), Tag :: term()},
                   State :: state()) ->
@@ -240,7 +248,7 @@ handle_command({set, ChangeFun}, From, #state{rumor = Rumor} = State)
     {change, NewData} ->
       handle_command({set, NewData}, From, State);
     no_change ->
-      {reply, ok, State}
+      {reply, {ok, Rumor}, State}
   end;
 handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
   NewRumor = simple_gossip_rumor:set_data(Rumor, Data),
@@ -248,7 +256,7 @@ handle_command({set, Data}, _From, #state{rumor = Rumor} = State) ->
              [erlang:phash2(Data, 9999), NewRumor#rumor.gossip_version]),
   gossip(NewRumor),
   simple_gossip_event:notify(NewRumor),
-  {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
+  {reply, {ok, NewRumor}, reschedule_gossip(State#state{rumor = NewRumor})};
 
 handle_command({join, Node}, _From, #state{rumor = Rumor} = State) ->
   case net_kernel:connect_node(Node) of
@@ -480,11 +488,13 @@ receive_gossip_version(Ref, Nodes, Vsn) ->
     {error, {timeout, Nodes}}
   end.
 
+-spec proxy_call(term(), {pid(), Tag :: term()}, state()) ->
+  {node(), {reply, term(), state()} | {noreply, state()}}.
 proxy_call(Command, From, State) ->
   proxy_call(Command, From, State, []).
 
 -spec proxy_call(term(), {pid(), Tag :: term()}, state(), [node()]) ->
-  {reply, term(), state()} | {noreply, state()}.
+  {node(), {reply, term(), state()} | {noreply, state()}}.
 proxy_call(Command, From,
            #state{rumor = #rumor{leader = Leader} = Rumor} = State,
            DownNodes) when Leader =/= node() ->
@@ -497,12 +507,12 @@ proxy_call(Command, From,
         NewRumor = Rumor#rumor{leader = NewLeader},
         proxy_call(Command, From, State#state{rumor = NewRumor}, NewDownNodes);
       {'EXIT', {timeout, _}} ->
-        {reply, timeout, State};
+        {Leader, {reply, timeout, State}};
       Else ->
-        {reply, Else, State}
+        {Leader, {reply, Else, State}}
     end;
 proxy_call(Command, From, State, _DownNodes) ->
-  handle_command(Command, From, State).
+  {node(), handle_command(Command, From, State)}.
 
 call(Leader, Command) ->
   call(Leader, Command, 1).

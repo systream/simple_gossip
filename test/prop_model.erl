@@ -5,6 +5,7 @@
 %% Model Callbacks
 -export([command/1, initial_state/0, next_state/3,
          precondition/2, postcondition/3, subscribe_on_node/1]).
+-export([format_server_state/1]).
 
 -define(RPC(Node, Function, Args),
         {call, rpc, call, [Node, simple_gossip, Function, Args]}).
