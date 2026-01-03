@@ -91,7 +91,7 @@ set_gossip_interval(Interval) ->
 
 -spec get_gossip() -> {ok, rumor()}.
 get_gossip() ->
-  gen_server:call(?SERVER, whisper_your_gossip, 1000).
+  gen_server:call(?SERVER, whisper_your_gossip, 5000).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -360,6 +360,10 @@ handle_cast({reconcile,
   end;
 handle_cast({reconcile, #rumor_head{gossip_version = InVersion}, _SenderNode},
             #state{rumor = #rumor{gossip_version = Version}} = State)
+  when InVersion =:= Version ->
+  {noreply, State};
+handle_cast({reconcile, #rumor{gossip_version = InVersion}, _SenderNode},
+    #state{rumor = #rumor{gossip_version = Version}} = State)
   when InVersion =:= Version ->
   {noreply, State};
 handle_cast({reconcile, InRumor, SenderNode}, #state{rumor = Rumor} = State) ->
