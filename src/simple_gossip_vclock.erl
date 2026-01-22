@@ -16,61 +16,64 @@
 
 -spec new() -> vclock().
 new() ->
-  #{}.
+    #{}.
 
 -spec increment(vclock()) -> vclock().
 increment(VClock) ->
-  increment(VClock, node(), timestamp()).
+    increment(VClock, node(), timestamp()).
 
 -spec increment(vclock(), node()) -> vclock().
 increment(VClock, Node) ->
-  increment(VClock, Node, timestamp()).
+    increment(VClock, Node, timestamp()).
 
 -spec increment(vclock(), node(), pos_integer()) -> vclock().
 increment(VClock, Node, Timestamp) ->
-  case maps:get(Node, VClock, deleted) of
-    {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}};
-    deleted -> VClock#{Node => {1, Timestamp}};
-    {Counter, _OldTs, deleted} -> VClock#{Node => {Counter + 1, Timestamp}}
-  end.
+    case maps:get(Node, VClock, deleted) of
+        {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}};
+        deleted -> VClock#{Node => {1, Timestamp}};
+        {Counter, _OldTs, deleted} -> VClock#{Node => {Counter + 1, Timestamp}}
+    end.
 
 -spec descendant(vclock(), vclock() | none | {node(), {pos_integer(), pos_integer()}, term()}) ->
-  boolean().
+    boolean().
 descendant(VClockA, {Node, {CounterB, TSB}, Iterator}) ->
-  case maps:get(Node, VClockA, not_found) of
-    not_found -> false;
-    {CounterA, _TSA} when CounterA > CounterB ->
-      descendant(VClockA, maps:next(Iterator));
-    {CounterA, TSA} when CounterA =:= CounterB andalso TSA =:= TSB ->
-      descendant(VClockA, maps:next(Iterator));
-    {_CounterA, _TSA, deleted} ->
-      descendant(VClockA, maps:next(Iterator));
-    _ ->
-      false
-  end;
+    case maps:get(Node, VClockA, not_found) of
+        not_found ->
+            false;
+        {CounterA, _TSA} when CounterA > CounterB ->
+            descendant(VClockA, maps:next(Iterator));
+        {CounterA, TSA} when CounterA =:= CounterB andalso TSA =:= TSB ->
+            descendant(VClockA, maps:next(Iterator));
+        {_CounterA, _TSA, deleted} ->
+            descendant(VClockA, maps:next(Iterator));
+        _ ->
+            false
+    end;
 descendant(VClockA, {_Node, {_CounterB, _TSB, deleted}, Iterator}) ->
-  descendant(VClockA, maps:next(Iterator));
+    descendant(VClockA, maps:next(Iterator));
 descendant(_VClockA, none) ->
-  true;
+    true;
 descendant(VClockA, VClockB) when is_map(VClockB) ->
-  descendant(VClockA, maps:next(maps:iterator(VClockB))).
+    descendant(VClockA, maps:next(maps:iterator(VClockB))).
 
 -spec timestamp() -> pos_integer().
 timestamp() ->
-  erlang:system_time(nanosecond).
+    erlang:system_time(nanosecond).
 
 -spec clean(vclock(), [node()]) -> vclock().
 clean(VClock, NodesList) ->
-  DropNodesAfter = timestamp() - 300_000_000_000, % 5 minutes
-  % We need to leave a deleted vclock as a thumb stone, at least some time
-  maps:fold(fun(VClockNode, {Counter, TS, deleted}, VClockAcc) ->
-    case TS > DropNodesAfter of
-      true -> VClockAcc;
-      _ -> VClockAcc#{VClockNode => {Counter, TS, deleted}}
-    end;
-    (VClockNode, {Counter, TS}, VClockAcc) ->
-      case lists:member(VClockNode, NodesList) of
-        true -> VClockAcc#{VClockNode => {Counter, TS, deleted}};
-        _ -> VClockAcc#{VClockNode => {Counter, TS}}
-      end
-    end, #{}, VClock).
+    % 5 minutes
+    DropNodesAfter = timestamp() - 300_000_000_000,
+    % We need to leave a deleted vclock as a thumb stone, at least some time
+    maps:fold(fun(VClockNode, {Counter, TS, deleted}, VClockAcc) ->
+                    case TS > DropNodesAfter of
+                        true -> VClockAcc;
+                        _ -> VClockAcc#{VClockNode => {Counter, TS, deleted}}
+                    end;
+                (VClockNode, {Counter, TS}, VClockAcc) ->
+                    case lists:member(VClockNode, NodesList) of
+                        true -> VClockAcc#{VClockNode => {Counter, TS}};
+                        _ -> VClockAcc#{VClockNode => {Counter, TS, deleted}}
+                    end
+            end, #{}, VClock
+    ).
