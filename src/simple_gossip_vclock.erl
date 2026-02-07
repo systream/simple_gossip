@@ -29,9 +29,9 @@ increment(VClock, Node) ->
 -spec increment(vclock(), node(), pos_integer()) -> vclock().
 increment(VClock, Node, Timestamp) ->
     case maps:get(Node, VClock, deleted) of
-        {Counter, _OldTs} -> VClock#{Node => {Counter + 1, Timestamp}};
+        {Counter, OldTs} -> VClock#{Node => {Counter + 1, max(OldTs, Timestamp) + 1}};
         deleted -> VClock#{Node => {1, Timestamp}};
-        {Counter, _OldTs, deleted} -> VClock#{Node => {Counter + 1, Timestamp}}
+        {Counter, OldTs, deleted} -> VClock#{Node => {Counter + 1, max(OldTs, Timestamp) + 1}}
     end.
 
 -spec descendant(vclock(), vclock() | none | {node(), {pos_integer(), pos_integer()}, term()}) ->
