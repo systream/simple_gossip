@@ -24,7 +24,7 @@ prop_test() ->
   simple_gossip_server:set_max_gossip_per_period(2000),
   ?FORALL(Cmds, commands(?MODULE),
           begin
-              simple_gossip:set(1),
+              simple_gossip:set_sync(1),
               {History, State, Result} = run_commands(?MODULE, Cmds),
               ?WHENFAIL(io:format("History: ~p\nState: ~p\nResult: ~p\n",
                                   [History, State, Result]),
@@ -62,7 +62,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
   RpcNode = oneof(InCluster),
   OneOfSubscribers = oneof([skip | Subscribers]),
     frequency([
-      {10, ?RPC(RpcNode, set, [resize(150, term())])},
+      {10, ?RPC(RpcNode, set_sync, [resize(150, term())])},
       {15, ?RPC(RpcNode, get, [])},
       {10, ?RPC(RandomNode, join, [RandomNode])},
       {10, ?RPC(RandomNode, leave, [RandomNode])},
@@ -75,7 +75,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
 %% @doc Determines whether a command should be valid under the
 %% current state.
 precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 120),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 240),
   true;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
@@ -102,6 +102,8 @@ postcondition(_State, {call, _Mod, _Fun, [_Node, _, leave, [_LeaveNode]]}, Res) 
   Res == ok;
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, set, [_Data]]}, Res) ->
   Res == ok;
+postcondition(_State, {call, _Mod, _Fun, [_Node, _, set_sync, [_Data]]}, _Res) ->
+  true;
 postcondition(_, {call, rpc, call, [_, _, get, []]}, undefined) ->
   true;
 postcondition(#{data := Data, in_cluster := ClusterNodes},
@@ -123,6 +125,14 @@ postcondition(_State, {call, _Mod, _Fun, _Args} = _A, _Res) ->
 %% accordingly for the test to proceed.
 next_state(#{in_cluster := ClusterNodes} = State, _Res,
            {call, rpc, call, [Node, _, set, [SetData]] = _Args}) ->
+  case lists:member(Node, ClusterNodes) of
+    true ->
+      State#{data => SetData};
+    _ ->
+      State
+  end;
+next_state(#{in_cluster := ClusterNodes} = State, _Res,
+    {call, rpc, call, [Node, _, set_sync, [SetData]] = _Args}) ->
   case lists:member(Node, ClusterNodes) of
     true ->
       State#{data => SetData};

@@ -30,15 +30,15 @@ set(Data) ->
   ok | {error, {timeout, node()} | term()} when
   Status :: term().
 set_sync(Data) ->
-  {ok, _} = simple_gossip_server:set(Data),
-  ok.
+  {ok, Rumor} = simple_gossip_server:set(Data),
+  simple_gossip_server:wait_to_propagate(Rumor).
 
 %% @doc Get rumor
 -spec get() -> term().
 get() ->
   simple_gossip_server:get().
 
--spec set(term(), term()) -> ok.
+-spec set(term(), term()) -> ok | {error, {timeout, node()} | term()}.
 set(Key, Value) ->
   {ok, _} = simple_gossip_cfg:set(Key, Value),
   ok.

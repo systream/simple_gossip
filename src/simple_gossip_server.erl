@@ -40,6 +40,10 @@
         handle_info/2,
         terminate/2]).
 
+-ifdef(TEST).
+-export([build_tree/2]).
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -define(RUMOR(State), State#state.rumor).
@@ -384,8 +388,8 @@ handle_cast({reconcile,
   case simple_gossip_rumor:check_vector_clocks(InRumor, CRumor) of
     true ->
       NewRumor1 = simple_gossip_rumor:check_node_exclude(InRumor),
-      GossipNodes = lists:delete(SenderNode,
-                                 lists:delete(node(), simple_gossip_rumor:nodes(NewRumor1))),
+      GossipNodes = lists:delete(SenderNode, gossip_neighbours(node(), NewRumor1)),
+
       gossip(NewRumor1, GossipNodes),
       simple_gossip_event:notify(NewRumor1),
       ?LOG_DEBUG("New gossip ~p From ~p",
@@ -459,7 +463,7 @@ terminate(_Reason, _State) ->
 %%%===================================================================
 -spec gossip(rumor()) -> ok.
 gossip(Rumor) ->
-  gossip(Rumor, remove_current_node(simple_gossip_rumor:nodes(Rumor))).
+  gossip(Rumor, gossip_neighbours(node(), Rumor)).
 
 -spec gossip_random_node(rumor()) -> ok.
 gossip_random_node(#rumor{nodes = []}) ->
@@ -476,9 +480,8 @@ remove_current_node(Nodes) ->
   lists:delete(node(), Nodes).
 
 -spec gossip(rumor(), node() | [node()]) -> ok.
-gossip(#rumor{max_gossip_per_period = Max} = Rumor, Nodes) when is_list(Nodes) ->
-  RandomNodes = simple_gossip_rumor:pick_random_nodes(Nodes, Max),
-  [gossip(Rumor, Node) || Node <- RandomNodes],
+gossip(Rumor, Nodes) when is_list(Nodes) ->
+  [gossip(Rumor, Node) || Node <- Nodes],
   ok;
 gossip(Rumor, Node) ->
   gen_server:cast({?MODULE, Node}, {reconcile, Rumor, node()}).
@@ -521,14 +524,14 @@ receive_gossip_version(Ref, Nodes, Version, Leader) ->
 -spec receive_gossip_version(reference(), [node()]) ->
   FinalResult when
   Version :: pos_integer(),
-  FinalResult :: {ok, Version} | {error, {timeout, [node()]}}.
+  FinalResult :: {ok, [Version]} | {error, {timeout, [node()]}}.
 receive_gossip_version(Ref, Nodes) ->
   receive_gossip_version(Ref, Nodes, []).
 
 -spec receive_gossip_version(reference(), [node()], [Version]) ->
   FinalResult when
   Version :: pos_integer(),
-  FinalResult :: {ok, Version} | {error, {timeout, [node()]}}.
+  FinalResult :: {ok, [Version]} | {error, {timeout, [node()]}}.
 receive_gossip_version(_, [], VsnAcc) ->
   {ok, VsnAcc};
 receive_gossip_version(Ref, Nodes, VsnAcc) ->
@@ -580,13 +583,35 @@ call(Leader, Command, Retry) ->
 -spec join_node(rumor(), node()) -> rumor().
 join_node(Rumor, Node) ->
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
-  case gen_server:call({?MODULE, Node}, {join_request, NewRumor},
-                               ?PROXY_CALL_TIMEOUT) of
+  case gen_server:call({?MODULE, Node}, {join_request, NewRumor}, ?PROXY_CALL_TIMEOUT) of
     {upgrade, UpgradeRumor} ->
-      ?LOG_DEBUG("Rumor upgraded from remote ~p ~p",
-                              [Node, UpgradeRumor#rumor.gossip_version]),
+      ?LOG_DEBUG("Rumor upgraded from remote ~p ~p", [Node, UpgradeRumor#rumor.gossip_version]),
       UpgradeRumor;
     ok ->
       NewRumor
   end.
 
+-spec gossip_neighbours(node(), rumor()) -> [node()].
+gossip_neighbours(Node, #rumor{nodes = Nodes, max_gossip_per_period = N}) ->
+  maps:get(Node, build_tree(N, Nodes), []).
+
+-spec build_tree(N :: integer(), Nodes :: [term()]) -> #{node() => [node()]}.
+build_tree(_N, []) -> #{};
+build_tree(_N, [_]) -> #{};
+build_tree(N, Nodes) ->
+  NodeCount = length(Nodes),
+  Len = erlang:min(N, NodeCount - 1),
+  Expand = lists:flatten(lists:duplicate(Len + 1, Nodes)),
+  {Tree, _} = lists:foldl(fun(CNode, {Result, CNodes}) ->
+                            {Neighbours, Rest} = lists:split(Len, CNodes),
+                            {Neighbours1, Rest1} =
+                              case lists:member(CNode, Neighbours) of
+                              true ->
+                                [NextNode | RRest] = Rest,
+                                {[NextNode | lists:delete(CNode, Neighbours)], RRest};
+                              _ ->
+                                {Neighbours, Rest}
+                            end,
+                            {Result#{CNode => Neighbours1}, Rest1}
+                          end, {#{}, tl(Expand)}, Nodes),
+  Tree.
