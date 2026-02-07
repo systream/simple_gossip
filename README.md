@@ -76,13 +76,13 @@ Use `simple_gossip` as a distributed key-value store backed by `persistent_term`
 
 ```erlang
 %% Get a configuration value with a default
-<<"default_value">> = simple_gossip:get_cfg(key, <<"default_value">>).
+<<"default_value">> = simple_gossip:get(key, <<"default_value">>).
 
 %% Set a configuration value
-ok = simple_gossip:set_cfg(key, some_random_value).
+ok = simple_gossip:set(key, some_random_value).
 
 %% Retrieve the updated value
-some_random_value = simple_gossip:get_cfg(key, <<"default_value">>).
+some_random_value = simple_gossip:get(key, <<"default_value">>).
 ```
 
 ### Cluster Management
