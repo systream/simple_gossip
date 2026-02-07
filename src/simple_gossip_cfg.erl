@@ -44,10 +44,11 @@ get(Key, Default) ->
       Value
   end.
 
--spec set(term(), term()) -> ok.
+-spec set(term(), term()) -> {ok, Vsn :: pos_integer()}.
 set(Key, Value) ->
-  ok = simple_gossip_server:set(fun(Data) -> {change, do_set(Key, Value, Data)} end),
-  persist(Key, Value).
+  {ok, Vsn} = simple_gossip_server:set(fun(Data) -> {change, do_set(Key, Value, Data)} end),
+  persist(Key, Value),
+  {ok, Vsn}.
 
 -spec do_set(term(), term(), undefined | map()) -> map().
 do_set(Key, Value, undefined) ->

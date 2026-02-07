@@ -107,6 +107,7 @@ all() ->
   [ set_get,
     set_get_via_fun,
     set_get_via_fun_no_change,
+    set_get_sync,
     notify_change,
     notify_change_not_on_leader,
     join_node,
@@ -117,6 +118,7 @@ all() ->
     leave_during_nodedown,
     status,
     status_timeout,
+    cfg_set_sync_cluster,
     stop_node,
     stop_leader_node,
     start_from_persist_data,
@@ -141,8 +143,8 @@ set_get(_Config) ->
 set_get_via_fun(_Config) ->
   simple_gossip:set("Prev"),
   simple_gossip:set(fun(State) ->
-    ?assertEqual("Prev", State),
-    {change, "Next"}
+                      ?assertEqual("Prev", State),
+                      {change, "Next"}
                     end),
   ?assertEqual("Next", simple_gossip:get()).
 
@@ -154,6 +156,10 @@ set_get_via_fun_no_change(_Config) ->
     no_change
                     end),
   ?assertEqual("Prev", simple_gossip:get()).
+
+set_get_sync(_Config) ->
+  ok = simple_gossip:set_sync("sync"),
+  ?assertEqual("sync", simple_gossip:get()).
 
 notify_change(_Config) ->
   application:ensure_all_started(simple_gossip),
@@ -290,6 +296,22 @@ status_timeout(_Config) ->
                simple_gossip:status()),
   simple_gossip:leave(Node).
 
+
+cfg_set_sync_cluster(_Config) ->
+  simple_gossip:set("default"),
+  Node = simple_gossip_test_tools:start_slave_node('sync_set'),
+  ok = simple_gossip:join(Node),
+  ct:sleep(100),
+  simple_gossip:set_sync(#{a => "change1"}),
+  ?assertEqual(#{a => "change1"}, simple_gossip:get()),
+  simple_gossip:set_sync(fun(_) -> {change, #{a => "change2"}} end),
+  ?assertEqual(#{a => "change2"}, simple_gossip:get()),
+
+  simple_gossip:set_sync(k, v),
+  ?assertEqual(v, simple_gossip:get(k, default)),
+  simple_gossip:leave(Node).
+
+
 stop_node(_Config) ->
   simple_gossip:set("default"),
   Node1 = simple_gossip_test_tools:start_slave_node('stop_1'),
@@ -412,9 +434,8 @@ cfg(_Config) ->
 
   simple_gossip:set(undefined), % clear data
   ?assertEqual(bar, simple_gossip:get(foo, bar)),
-  ok = simple_gossip:set(foo, bar2),
+  _ = simple_gossip:set_sync(foo, bar2),
   ?assertEqual(bar2, simple_gossip:get(foo, bar)),
-  ct:sleep(100),
   ?assertEqual(bar2, simple_gossip:get(foo, bar)),
   simple_gossip:set(foo, bar3),
   ?assertEqual(bar3, simple_gossip:get(foo, bar)),

@@ -85,6 +85,8 @@ ok = simple_gossip:set(key, some_random_value).
 some_random_value = simple_gossip:get(key, <<"default_value">>).
 ```
 
+*Notice:* If you want to block the call until the data propagated to the cluster call `set_sync/1` `set_sync/2` functions
+
 ### Cluster Management
 
 **Get Cluster Status:**

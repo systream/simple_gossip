@@ -9,9 +9,9 @@
 -include("simple_gossip.hrl").
 
 %% API
--export([set/1, get/0, join/1, leave/1, status/0, subscribe/1, unsubscribe/1]).
+-export([set/1, set_sync/1, get/0, join/1, leave/1, status/0, subscribe/1, unsubscribe/1]).
 
--export([set/2, get/2]).
+-export([set/2, set_sync/2, get/2]).
 
 -export([subscribe/2]).
 
@@ -23,7 +23,15 @@
 -spec set(Status | fun((Status) -> {change, Status} | no_change)) -> ok when
   Status :: term().
 set(Data) ->
-  simple_gossip_server:set(Data).
+  {ok, _} = simple_gossip_server:set(Data),
+  ok.
+
+-spec set_sync(Status | fun((Status) -> {change, Status} | no_change)) ->
+  ok | {error, {timeout, node()} | term()} when
+  Status :: term().
+set_sync(Data) ->
+  {ok, _} = simple_gossip_server:set(Data),
+  ok.
 
 %% @doc Get rumor
 -spec get() -> term().
@@ -32,7 +40,13 @@ get() ->
 
 -spec set(term(), term()) -> ok.
 set(Key, Value) ->
-  simple_gossip_cfg:set(Key, Value).
+  {ok, _} = simple_gossip_cfg:set(Key, Value),
+  ok.
+
+-spec set_sync(term(), term()) -> ok | {error, {timeout, node()} | term()}.
+set_sync(Key, Value) ->
+  {ok, Rumor} = simple_gossip_cfg:set(Key, Value),
+  simple_gossip_server:wait_to_propagate(Rumor).
 
 -spec get(term(), term()) -> term().
 get(Key, Default) ->

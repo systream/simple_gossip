@@ -18,18 +18,20 @@
 %% API
 -export([start_link/0,
 
-         join/1,
-         leave/1,
+          join/1,
+          leave/1,
 
-         set/1,
-         get/0,
+          set/1,
+          get/0,
 
-         status/0,
+          status/0,
 
-         get_gossip/0,
+          get_gossip/0,
 
-         set_max_gossip_per_period/1,
-         set_gossip_interval/1]).
+          set_max_gossip_per_period/1,
+          set_gossip_interval/1,
+
+          wait_to_propagate/3, wait_to_propagate/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -55,14 +57,49 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec set(term() | set_fun()) -> ok.
+-spec set(term() | set_fun()) -> {ok, rumor()}.
 set(Data) ->
-  {ok, _} = gen_server:call(?SERVER, {set, Data}),
-  ok.
+  {ok, _Rumor} = gen_server:call(?SERVER, {set, Data}).
 
 -spec get() -> term().
 get() ->
   gen_server:call(?SERVER, get).
+
+-spec wait_to_propagate(rumor()) -> ok | {error, {timeout, node()} | term()}.
+wait_to_propagate(#rumor{nodes = Nodes, gossip_version = Vsn}) ->
+  Caller = self(),
+  {Pid, Ref} = spawn_opt(?MODULE, wait_to_propagate, [Caller, Vsn, Nodes], [{monitor, [{'alias', 'demonitor'}]}]),
+  receive
+    {'DOWN', Ref, process, _Pid, Reason} ->
+      {error, Reason};
+    {result, Pid, Result} ->
+      erlang:demonitor(Ref, [flush]),
+      Result
+  end.
+
+-spec wait_to_propagate(pid(), pos_integer(), [node()]) -> term().
+wait_to_propagate(Caller, Vsn, Nodes) ->
+  wait_to_propagate(Caller, Vsn, Nodes, 10).
+
+-spec wait_to_propagate(pid(), pos_integer(), [node()], pos_integer()) -> term().
+wait_to_propagate(Caller, TargetVsn, Nodes, RetryCount) ->
+  Ref = make_ref(),
+  gen_server:abcast(Nodes, ?MODULE, {get_gossip_version, self(), Ref}),
+  case receive_gossip_version(Ref, Nodes) of
+    {ok, Versions} ->
+      case lists:all(fun(AggregatedVersion) -> AggregatedVersion >= TargetVsn end, Versions) of
+        true ->
+          Caller ! {result, self(), ok};
+        _ ->
+          timer:sleep(200),
+          wait_to_propagate(Caller, TargetVsn, Nodes, RetryCount - 1)
+      end;
+    {error, {timeout, _Node}} when RetryCount > 0 ->
+      timer:sleep(200),
+      wait_to_propagate(Caller, TargetVsn, Nodes, RetryCount - 1);
+    Result ->
+      Caller ! {result, self(), Result}
+  end.
 
 -spec join(node()) -> ok | {error, term()}.
 join(Node) ->
@@ -469,25 +506,35 @@ cancel_timer(#state{timer_ref = TimerRef}) ->
 -spec receive_gossip_version(reference(), [node()], pos_integer(), node()) ->
   {ok, pos_integer(), node(), [node()]} | {error, term(), node(), [node()]}.
 receive_gossip_version(Ref, Nodes, Version, Leader) ->
-  case receive_gossip_version(Ref, Nodes, Version) of
-    {ok, Ver} ->
-      {ok, Ver, Leader, Nodes};
+  case receive_gossip_version(Ref, Nodes) of
+    {ok, Versions} ->
+      case lists:all(fun (AggregatedVersions) -> AggregatedVersions =:= Version end, Versions) of
+        true ->
+          {ok, Version, Leader, Nodes};
+        false ->
+          {error, gossip_vsn_mismatch}
+      end;
     {error, Else} ->
       {error, Else, Leader, Nodes}
   end.
 
--spec receive_gossip_version(reference(), [node()], Version) ->
+-spec receive_gossip_version(reference(), [node()]) ->
   FinalResult when
   Version :: pos_integer(),
-  FinalResult :: {ok, Version} | {error, {timeout, [node()]} | gossip_vsn_mismatch}.
-receive_gossip_version(_, [], Vsn) ->
-  {ok, Vsn};
-receive_gossip_version(Ref, Nodes, Vsn) ->
+  FinalResult :: {ok, Version} | {error, {timeout, [node()]}}.
+receive_gossip_version(Ref, Nodes) ->
+  receive_gossip_version(Ref, Nodes, []).
+
+-spec receive_gossip_version(reference(), [node()], [Version]) ->
+  FinalResult when
+  Version :: pos_integer(),
+  FinalResult :: {ok, Version} | {error, {timeout, [node()]}}.
+receive_gossip_version(_, [], VsnAcc) ->
+  {ok, VsnAcc};
+receive_gossip_version(Ref, Nodes, VsnAcc) ->
   receive
     {gossip_vsn, Vsn, Ref, Node} ->
-      receive_gossip_version(Ref, lists:delete(Node, Nodes), Vsn);
-    {gossip_vsn, _MismatchVsn, Ref, _Node} ->
-      {error, gossip_vsn_mismatch}
+      receive_gossip_version(Ref, lists:delete(Node, Nodes), [Vsn | VsnAcc])
   after ?STATUS_RECEIVE_TIMEOUT ->
     {error, {timeout, Nodes}}
   end.
