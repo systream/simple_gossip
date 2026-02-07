@@ -101,10 +101,10 @@ handle_cast(_Request, State) ->
 -spec handle_info({data_changed, undefined | map()}, State :: state()) ->
   {noreply, NewState :: state()} | {noreply, NewState :: state(), hibernate}.
 handle_info({data_changed, undefined}, State) ->
-  {noreply, State, hibernate};
+  {noreply, State};
 handle_info({data_changed, Data}, State) ->
   persist(Data),
-  {noreply, State, hibernate}.
+  {noreply, State}.
 
 -spec persist(map()) -> ok.
 persist(Data) when is_map(Data) ->

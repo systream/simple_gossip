@@ -107,8 +107,7 @@ init(_) ->
                    {stop, Reason :: term(), NewState :: state()}).
 handle_call({notify, Rumor}, _From, #state{} = State) ->
   {reply, ok, handle_notify(Rumor, State)};
-handle_call({subscribe, Pid, Type}, _From, #state{subscribers = Subscribers} =
-  State) ->
+handle_call({subscribe, Pid, Type}, _From, #state{subscribers = Subscribers} = State) ->
   check_mode(),
   case maps:get(Pid, Subscribers, not_found) of
     not_found ->
