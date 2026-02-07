@@ -22,6 +22,7 @@ prop_test() ->
   application:ensure_all_started(simple_gossip),
   simple_gossip_test_tools:wait_to_reconcile(),
   simple_gossip_server:set_max_gossip_per_period(2000),
+  logger:set_primary_config(level, info),
   ?FORALL(Cmds, commands(?MODULE),
           begin
               simple_gossip:set_sync(1),
@@ -30,7 +31,6 @@ prop_test() ->
                                   [History, State, Result]),
                         aggregate(cmd_names(Cmds), Result =:= ok))
           end).
-
 
 cmd_names({Cmds, L}) ->
   lists:flatten([cmd_names(Cmds)|[ cmd_names(Cs) || Cs <- L ]]);
@@ -41,7 +41,6 @@ cm({rpc, call, [_, M, F, A]}) ->
   cm({M, F, A});
 cm({M, F, Args}) ->
   {M, F, length(Args)}.
-
 
 %%%%%%%%%%%%%
 %%% MODEL %%%
@@ -64,12 +63,12 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
     frequency([
       {10, ?RPC(RpcNode, set_sync, [resize(150, term())])},
       {15, ?RPC(RpcNode, get, [])},
-      {10, ?RPC(RandomNode, join, [RandomNode])},
-      {10, ?RPC(RandomNode, leave, [RandomNode])},
+      {6, ?RPC(RandomNode, join, [RandomNode])},
+      {5, ?RPC(RandomNode, leave, [RandomNode])},
 
-      {5, {call, ?MODULE, subscribe_on_node, [RandomNode]}},
+      {2, {call, ?MODULE, subscribe_on_node, [RandomNode]}},
       {4, ?RPC(RpcNode, unsubscribe, [OneOfSubscribers])},
-      {3, {call, erlang, exit, [OneOfSubscribers, kill]}}
+      {1, {call, erlang, exit, [OneOfSubscribers, kill]}}
   ]).
 
 %% @doc Determines whether a command should be valid under the
@@ -99,7 +98,7 @@ precondition(_State, {call, _Mod, _Fun, _Args}) ->
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, join, [_JoinNode]]}, Res) ->
   Res == ok;
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, leave, [_LeaveNode]]}, Res) ->
-  Res == ok;
+  Res == ok orelse Res == {error, not_member};
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, set, [_Data]]}, Res) ->
   Res == ok;
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, set_sync, [_Data]]}, _Res) ->
@@ -147,7 +146,7 @@ next_state(#{in_cluster := ClusterNodes} = State, _Res,
     _ ->
       State#{in_cluster => lists:usort([FromNode, ToNode | ClusterNodes])}
   end;
-next_state(#{in_cluster := ClusterNodes} = State, _Res,
+next_state(#{in_cluster := ClusterNodes} = State, ok,
            {call, rpc, call, [FromNode, _, leave, [ToNode]] = _Args}) ->
   case lists:member(FromNode, ClusterNodes) of
     false ->

@@ -121,7 +121,7 @@ remove_node(#rumor{nodes = Nodes} = Rumor, Node) ->
 check_node_exclude(#rumor{} = Rumor) ->
   if_not_member(Rumor, node(),
                 fun() ->
-                  ?LOG_INFO("New rumor created because"
+                  ?LOG_INFO("New rumor created because "
                             "the incoming rumor not contains the current node"),
                   increase_vector_clock(new(Rumor))
                 end).
