@@ -67,8 +67,8 @@ clean(VClock, NodesList) ->
     % We need to leave a deleted vclock as a thumb stone, at least some time
     maps:fold(fun(VClockNode, {Counter, TS, deleted}, VClockAcc) ->
                     case TS > DropNodesAfter of
-                        true -> VClockAcc;
-                        _ -> VClockAcc#{VClockNode => {Counter, TS, deleted}}
+                        true -> VClockAcc#{VClockNode => {Counter, TS, deleted}};
+                        _ -> VClockAcc
                     end;
                 (VClockNode, {Counter, TS}, VClockAcc) ->
                     case lists:member(VClockNode, NodesList) of
