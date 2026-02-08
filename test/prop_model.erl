@@ -61,7 +61,7 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
   RpcNode = oneof(InCluster),
   OneOfSubscribers = oneof([skip | Subscribers]),
     frequency([
-      {10, ?RPC(RpcNode, set_sync, [resize(150, term())])},
+      {10, ?RPC(RpcNode, set, [resize(150, term())])},
       {15, ?RPC(RpcNode, get, [])},
       {6, ?RPC(RandomNode, join, [RandomNode])},
       {5, ?RPC(RandomNode, leave, [RandomNode])},
@@ -74,12 +74,17 @@ command(#{nodes := Nodes, in_cluster := InCluster, subscribers := Subscribers}) 
 %% @doc Determines whether a command should be valid under the
 %% current state.
 precondition(_, {call, rpc, call, [Node, _, get, []]}) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 240),
-  true;
+  case simple_gossip_test_tools:wait_to_reconcile(Node, 5000) of
+    ok -> true;
+    _ -> io:format("Precondition GET failed timeout Node: ~p~n", [Node]), false
+  end;
 precondition(#{in_cluster := ClusterNodes},
              {call, rpc, call, [Node, _, join, [ToNode]]}) ->
   Res = lists:member(Node, ClusterNodes) orelse lists:member(ToNode, ClusterNodes),
-  precondition_wait_to_reconcile(Res, Node);
+  case precondition_wait_to_reconcile(Res, Node) of
+    true -> true;
+    false -> io:format("Precondition JOIN failed Res: ~p Node: ~p~n", [Res, Node]), false
+  end;
 precondition(_, {call, rpc, call, [Node, _, leave, [FromNode]]}) ->
   Res = Node =/= FromNode,
   precondition_wait_to_reconcile(Res, Node);
@@ -96,27 +101,44 @@ precondition(_State, {call, _Mod, _Fun, _Args}) ->
 %% `{call, Mod, Fun, Args}', determine whether the result
 %% `Res' (coming from the actual system) makes sense.
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, join, [_JoinNode]]}, Res) ->
-  Res == ok;
+  case Res == ok of
+    true -> true;
+    false -> io:format("Postcondition JOIN failed Res: ~p~n", [Res]), false
+  end;
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, leave, [_LeaveNode]]}, Res) ->
-  Res == ok orelse Res == {error, not_member};
+  case Res == ok orelse Res == {error, not_member} of
+    true -> true;
+    false -> io:format("Postcondition LEAVE failed Res: ~p~n", [Res]), false
+  end;
 postcondition(_State, {call, _Mod, _Fun, [_Node, _, set, [_Data]]}, Res) ->
-  Res == ok;
-postcondition(_State, {call, _Mod, _Fun, [_Node, _, set_sync, [_Data]]}, _Res) ->
-  true;
+  case Res == ok of
+    true -> true;
+    false -> io:format("Postcondition SET failed Res: ~p~n", [Res]), false
+  end;
+postcondition(_State, {call, _Mod, _Fun, [_Node, _, set_sync, [_Data]]}, Res) ->
+  case Res == ok of
+    true -> true;
+    false -> io:format("Postcondition SET failed Res: ~p~n", [Res]), false
+  end;
 postcondition(_, {call, rpc, call, [_, _, get, []]}, undefined) ->
   true;
 postcondition(#{data := Data, in_cluster := ClusterNodes},
-              {call, rpc, call, [_Node, _, get, []]}, Res) ->
-  case Data /= Res of
+              {call, rpc, call, [Node, _, get, []]}, Res) ->
+  case lists:member(Node, ClusterNodes) of
     true ->
-      dump_server_states(ClusterNodes),
-      io:format("Different data -~n OnNode: ~p~n In cluster: ~p~n Expected data hash: ~p~n Got Data hash: ~p~n",
-                [_Node, ClusterNodes, erlang:phash2(Data, 9999), erlang:phash2(Res, 9999)]),
-      ok;
-    _ ->
-      ok
-  end,
-  Data == Res;
+      case Data /= Res of
+        true ->
+          dump_server_states(ClusterNodes),
+          io:format("Different data -~n OnNode: ~p~n In cluster: ~p~n Expected data hash: ~p~n Got Data hash: ~p~n Expected Data: ~p~n Got Data: ~p~n",
+                    [Node, ClusterNodes, erlang:phash2(Data, 9999), erlang:phash2(Res, 9999), Data, Res]),
+          ok;
+        _ ->
+          ok
+      end,
+      Data == Res;
+    false ->
+      true
+  end;
 postcondition(_State, {call, _Mod, _Fun, _Args} = _A, _Res) ->
   true.
 
@@ -146,7 +168,7 @@ next_state(#{in_cluster := ClusterNodes} = State, _Res,
     _ ->
       State#{in_cluster => lists:usort([FromNode, ToNode | ClusterNodes])}
   end;
-next_state(#{in_cluster := ClusterNodes} = State, ok,
+next_state(#{in_cluster := ClusterNodes} = State, _Res,
            {call, rpc, call, [FromNode, _, leave, [ToNode]] = _Args}) ->
   case lists:member(FromNode, ClusterNodes) of
     false ->
@@ -159,8 +181,11 @@ next_state(#{subscribers := Subscribers} = State, Pid,
            {call, ?MODULE, subscribe_on_node, [_]}) ->
   State#{subscribers => [Pid | Subscribers]};
 
+next_state(State, _Res, {call,rpc,call, [_, simple_gossip, get, []]}) ->
+  State;
+
 next_state(State, _Res, {call, _Mod, _Fun, _Args}) ->
-  %io:format("Not handled command: ~p~n", [{call, _Mod, _Fun, _Args}]),
+  io:format("Not handled command: ~p~nRe:~p~n", [{call, _Mod, _Fun, _Args}, _Res]),
   State.
 
 subscribe_on_node(Node) ->

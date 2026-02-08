@@ -186,7 +186,7 @@ pre_sync(StoredRumor) ->
 fetch_gossip(Nodes, StoredRumor) ->
   case simple_gossip_rumor:pick_random_nodes(Nodes, 1) of
     [Node] ->
-      case catch rpc:call(Node, ?MODULE, get_gossip, []) of
+      case catch rpc:call(Node, ?MODULE, get_gossip, [], 6000) of
         {ok, NewRumor} when NewRumor#rumor.gossip_version > StoredRumor#rumor.gossip_version ->
           ?LOG_INFO("PreSync rumor from ~p gossip vsn: ~p", [Node, NewRumor#rumor.gossip_version]),
           simple_gossip_rumor:check_node_exclude(NewRumor);
