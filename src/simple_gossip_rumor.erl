@@ -30,7 +30,9 @@
   change_max_gossip_per_period/2,
   change_gossip_interval/2,
   calculate_new_leader/1,
-  calculate_new_leader/2, version/1]).
+  calculate_new_leader/2,
+  leader/1,
+  version/1]).
 
 -type manage_node_fun() ::  fun(() -> rumor()).
 -type if_leader_node_fun() ::  fun((node()) -> rumor()).
@@ -136,6 +138,10 @@ pick_random_nodes(Nodes, Number, Acc) when Nodes == [] orelse Number == 0 ->
 pick_random_nodes(Nodes, Number, Acc) ->
   Node = lists:nth(rand:uniform(length(Nodes)), Nodes),
   pick_random_nodes(lists:delete(Node, Nodes), Number - 1, [Node | Acc]).
+
+-spec leader(rumor()) -> node().
+leader(#rumor{leader = Leader}) ->
+  Leader.
 
 -spec change_leader(rumor()) -> rumor().
 change_leader(#rumor{nodes = Nodes, leader = Leader} = Rumor)

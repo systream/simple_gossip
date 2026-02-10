@@ -321,7 +321,7 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   when Node == node() ->
   ?LOG_INFO("Node ~p leaving. Leader: ~p", [Node, Node]),
   OthersRumor = simple_gossip_rumor:remove_node(Rumor, Node),
-  gossip(OthersRumor),
+  gossip(OthersRumor, gossip_neighbours(simple_gossip_rumor:leader(OthersRumor), OthersRumor)),
   MyRumor = simple_gossip_rumor:new(Rumor),
   simple_gossip_event:notify(MyRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = MyRumor})};
