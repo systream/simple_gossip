@@ -100,7 +100,9 @@ precondition(_State, {call, _Mod, _Fun, _Args}) ->
 %% @doc Given the state `State' *prior* to the call
 %% `{call, Mod, Fun, Args}', determine whether the result
 %% `Res' (coming from the actual system) makes sense.
-postcondition(_State, {call, _Mod, _Fun, [_Node, _, join, [_JoinNode]]}, Res) ->
+postcondition(_State, {call, _Mod, _Fun, [Node, _, join, [JoinNode]]}, Res) ->
+  precondition_wait_to_reconcile(true, Node),
+  precondition_wait_to_reconcile(true, JoinNode),
   case Res == ok of
     true -> true;
     false -> io:format("Postcondition JOIN failed Res: ~p~n", [Res]), false
