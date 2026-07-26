@@ -183,12 +183,12 @@ next_state(#{subscribers := Subscribers} = State, Pid,
            {call, ?MODULE, subscribe_on_node, [_]}) ->
   State#{subscribers => [Pid | Subscribers]};
 
-next_state(#{subscribers := Subscribers} = State, ok,
+next_state(#{subscribers := Subscribers} = State, _,
            {call, rpc, call, [_Node, _, unsubscribe, [Subscriber]] = _Args}) ->
   State#{subscribers => lists:delete(Subscriber, Subscribers)};
 
 next_state(#{subscribers := Subscribers} = State, _,
-           {call, erlang, exit, [Subscriber]}) ->
+           {call, erlang, exit, [Subscriber, kill]}) ->
   State#{subscribers => lists:delete(Subscriber, Subscribers)};
 
 next_state(State, _Res, {call,rpc,call, [_, simple_gossip, get, []]}) ->
