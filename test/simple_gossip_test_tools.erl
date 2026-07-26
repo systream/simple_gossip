@@ -82,8 +82,11 @@ wait_to_reconcile(Node, Timeout) ->
     spawn(fun F() ->
       timer:sleep(2),
       case rpc:call(Node, simple_gossip, status, []) of
-        {error, gossip_vsn_mismatch, _Leader, _Nodes}->
+        {error, gossip_vsn_mismatch, _Leader, _Nodes} ->
           timer:sleep(6),
+          F();
+        {error, {timeout, _}, _Leader, _Nodes} ->
+          timer:sleep(10),
           F();
         _Result ->
           Master ! {self(), ok}

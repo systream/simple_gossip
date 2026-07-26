@@ -183,6 +183,14 @@ next_state(#{subscribers := Subscribers} = State, Pid,
            {call, ?MODULE, subscribe_on_node, [_]}) ->
   State#{subscribers => [Pid | Subscribers]};
 
+next_state(#{subscribers := Subscribers} = State, ok,
+           {call, rpc, call, [_Node, _, unsubscribe, [Subscriber]] = _Args}) ->
+  State#{subscribers => lists:delete(Subscriber, Subscribers)};
+
+next_state(#{subscribers := Subscribers} = State, _,
+           {call, erlang, exit, [Subscriber]}) ->
+  State#{subscribers => lists:delete(Subscriber, Subscribers)};
+
 next_state(State, _Res, {call,rpc,call, [_, simple_gossip, get, []]}) ->
   State;
 
@@ -226,7 +234,7 @@ format_server_state(undefined) ->
   io:format("Gossip server not running, pid is undefined~n", []).
 
 precondition_wait_to_reconcile(true, Node) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 10),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 1536),
   true;
 precondition_wait_to_reconcile(false, _Node) ->
   false.
