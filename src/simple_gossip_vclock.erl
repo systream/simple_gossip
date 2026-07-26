@@ -74,7 +74,7 @@ clean(VClock, NodesList) ->
                 (VClockNode, {Counter, TS}, VClockAcc) ->
                     case lists:member(VClockNode, NodesList) of
                         true -> VClockAcc#{VClockNode => {Counter, TS}};
-                        _ -> VClockAcc#{VClockNode => {Counter, TS, {deleted, Now}}}
+                        _ -> VClockAcc#{VClockNode => {Counter + 1, TS, {deleted, Now}}}
                     end
             end, #{}, VClock
     ).

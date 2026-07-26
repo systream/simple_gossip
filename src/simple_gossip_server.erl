@@ -106,8 +106,11 @@ wait_to_propagate(Caller, TargetVsn, Nodes, RetryCount) ->
   end.
 
 -spec join(node()) -> ok | {error, term()}.
-join(Node) ->
-  gen_server:call(?SERVER, {join, Node}).
+join(Node) when Node =/= node() ->
+  gen_server:call(?SERVER, {join, Node});
+join(_Node) ->
+  % self join
+  ok.
 
 -spec leave(node()) -> ok.
 leave(Node) ->
