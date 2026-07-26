@@ -41,7 +41,7 @@
         terminate/2]).
 
 -ifdef(TEST).
--export([build_tree/2]).
+-export([build_tree/2, get_node_tree/2]).
 -endif.
 
 -define(SERVER, ?MODULE).
@@ -261,7 +261,11 @@ handle_call({join_request, #rumor{gossip_version = InGossipVsn}}, {FromPid, _},
               State) when InGossipVsn < CurrentGossipVsn ->
   Node = node(FromPid),
   NewRumor = simple_gossip_rumor:add_node(Rumor, Node),
+  % Confirm the join request
   gossip(NewRumor, Node),
+
+  % update others
+  gossip(NewRumor),
   ?LOG_INFO(
     "Join request from ~p. Current rumor (~p) is greater than the remote (~p)." ++
     " Asking remote to upgrade", [Node, CurrentGossipVsn, InGossipVsn]),
@@ -593,7 +597,20 @@ join_node(Rumor, Node) ->
 
 -spec gossip_neighbours(node(), rumor()) -> [node()].
 gossip_neighbours(Node, #rumor{nodes = Nodes, max_gossip_per_period = N}) ->
-  maps:get(Node, build_tree(N, Nodes), []).
+  maps:get(Node, get_node_tree(N, Nodes), []).
+
+-spec get_node_tree(N :: integer(), Nodes :: [term()]) -> #{node() => [node()]}.
+get_node_tree(N, Nodes) ->
+  case erlang:get(node_tree) of
+    {N, Nodes, NodeTree} ->
+      % of the nodes and the N val matches
+      NodeTree;
+    _ ->
+        %  not found or not march regenerate
+      Result = build_tree(N, Nodes),
+      erlang:put(node_tree, {N, Nodes, Result}),
+      Result
+  end.
 
 -spec build_tree(N :: integer(), Nodes :: [term()]) -> #{node() => [node()]}.
 build_tree(_N, []) -> #{};

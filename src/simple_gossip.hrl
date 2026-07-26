@@ -16,7 +16,7 @@
 }).
 
 -record(rumor_head, {gossip_version = 1 :: pos_integer(),
-                     vector_clock = simple_gossip_vclock:vclock()
+                     vector_clock :: simple_gossip_vclock:vclock()
 }).
 
 -type rumor() :: #rumor{}.

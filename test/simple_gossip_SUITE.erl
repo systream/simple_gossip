@@ -452,7 +452,7 @@ cfg(_Config) ->
 epidemic_tree(_Config) ->
   %  a
   % b  c
-  Tree = simple_gossip_server:build_tree(2, [a, b, c]),
+  Tree = simple_gossip_server:get_node_tree(2, [a, b, c]),
   ?assertEqual([b,c], maps:get(a, Tree)),
   ?assertEqual([c, a], maps:get(b, Tree)),
   ?assertEqual([a, b], maps:get(c, Tree)),
@@ -461,21 +461,21 @@ epidemic_tree(_Config) ->
   %   b  c
   %  d a/b d
 
-  Tree2 = simple_gossip_server:build_tree(2, [a, b, c, d]),
+  Tree2 = simple_gossip_server:get_node_tree(2, [a, b, c, d]),
   ?assertEqual([b,c], maps:get(a, Tree2)),
   ?assertEqual([d, a], maps:get(b, Tree2)),
   ?assertEqual([d, b], maps:get(c, Tree2)),
   ?assertEqual([a, b], maps:get(d, Tree2)),
 
-  ?assertEqual(#{}, simple_gossip_server:build_tree(2, [])),
+  ?assertEqual(#{}, simple_gossip_server:get_node_tree(2, [])),
 
-  ?assertEqual(#{}, simple_gossip_server:build_tree(2, [a])),
+  ?assertEqual(#{}, simple_gossip_server:get_node_tree(2, [a])),
 
-  ?assertEqual(#{a => [b], b => [a]}, simple_gossip_server:build_tree(2, [a, b])),
+  ?assertEqual(#{a => [b], b => [a]}, simple_gossip_server:get_node_tree(2, [a, b])),
 
-  ?assertEqual(#{a => [b], b => [c], c => [a]}, simple_gossip_server:build_tree(1, [a, b, c])),
+  ?assertEqual(#{a => [b], b => [c], c => [a]}, simple_gossip_server:get_node_tree(1, [a, b, c])),
 
-  ?assertEqual(#{a => [b, c], b => [c, a], c => [a, b]}, simple_gossip_server:build_tree(10, [a, b, c])),
+  ?assertEqual(#{a => [b, c], b => [c, a], c => [a, b]}, simple_gossip_server:get_node_tree(10, [a, b, c])),
 
   ok.
 
