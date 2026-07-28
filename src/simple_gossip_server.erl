@@ -232,11 +232,12 @@ handle_call(get, _From, #state{rumor = Rumor} = State) ->
   {reply, simple_gossip_rumor:data(Rumor), State};
 handle_call({set, Data}, From, State) ->
   case proxy_call({set, Data}, From, State) of
-    {Leader, {reply, {ok, Rumor}, State}} -> % Let's update the rumor locally too
-      {noreply, NewState} = handle_cast({reconcile, Rumor, Leader}, State),
-      {reply, {ok, Rumor}, NewState};
-    {_Leader, Else} ->
-      Else
+    {Leader, {reply, {ok, Rumor}, NewState}} when Leader =/= node() ->
+      % Let's update the rumor locally too
+      {noreply, NewState1} = handle_cast({reconcile, Rumor, Leader}, NewState),
+      {reply, {ok, Rumor}, NewState1};
+    {_Leader, LocalOrErrorReply} ->
+      LocalOrErrorReply
   end;
 handle_call(status, From, #state{rumor = #rumor{nodes = Nodes,
                                                 gossip_version = Version,
