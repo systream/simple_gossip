@@ -47,13 +47,13 @@ new() ->
          vector_clock = simple_gossip_vclock:new()}.
 
 -spec new(rumor()) -> rumor().
-new(#rumor{vector_clock = VectorClocks}) ->
+new(#rumor{vector_clock = VectorClocks} = OldRumor) ->
   Nodes = [node()],
   NewVectorClocks = simple_gossip_vclock:clean(VectorClocks, Nodes),
-  #rumor{leader = node(),
-         nodes = Nodes,
-         gossip_version = 1,
-         vector_clock = NewVectorClocks}.
+  OldRumor#rumor{leader = node(),
+                 nodes = Nodes,
+                 gossip_version = 1,
+                 vector_clock = NewVectorClocks}.
 
 -spec head(rumor()) -> rumor_head().
 head(#rumor{gossip_version = GossipVersion, vector_clock = VectorClock}) ->
@@ -159,7 +159,15 @@ calculate_new_leader(Rumor) ->
 calculate_new_leader(#rumor{nodes = Nodes, leader = Leader}, ExcludeNodes) when
   is_list(ExcludeNodes) ->
   [_ | _] = ONodes = lists:usort((Nodes -- [Leader]) -- ExcludeNodes),
-  lists:nth(erlang:phash2(ONodes, length(ONodes)) + 1, ONodes).
+  case ONodes of
+    [_ | _] ->
+      lists:nth(erlang:phash2(ONodes, length(ONodes)) + 1, ONodes);
+    [] ->
+      % all the neighbours are unresponsive
+      ?LOG_WARNING("Could not calculate leader, ",
+                   "all the neighbours are unresponsive, fallback to local node"),
+      node()
+  end.
 
 -spec if_not_member(rumor(), node(), manage_node_fun()) -> rumor().
 if_not_member(Rumor, Node, Fun) ->
