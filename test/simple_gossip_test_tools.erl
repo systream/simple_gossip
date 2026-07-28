@@ -12,10 +12,12 @@
 
 %% API
 -export([stop_cluster/1, wait_to_reconcile/0, start_slave_node/1,
-         stop_cluster/0, start_nodes/1, init_netkernel/0, wait_to_reconcile/2]).
+         stop_cluster/0, start_nodes/1, init_netkernel/0, wait_to_reconcile/2,
+         reset_cluster/1]).
 
 -spec start_slave_node(atom()) -> node().
 start_slave_node(NodeName) ->
+  init_netkernel(),
   EbinDirs =
     filename:dirname(filename:dirname(code:priv_dir(simple_gossip))) ++ "/*/ebin",
   ErlFlags = "-pa " ++ EbinDirs,
@@ -101,3 +103,16 @@ wait_to_reconcile(Node, Timeout) ->
     end,
   exit(Pid, kill),
   R.
+
+-spec reset_cluster([node()]) -> ok.
+reset_cluster(Nodes) ->
+  AllNodes = lists:usort(Nodes ++ [node()]),
+  rpc:multicall(AllNodes, application, stop, [simple_gossip]),
+  rpc:multicall(AllNodes, simple_gossip_persist, delete_file, []),
+  rpc:multicall(AllNodes, application, ensure_all_started, [simple_gossip]),
+  Leader = hd(AllNodes),
+  [rpc:call(Leader, simple_gossip, join, [Node]) || Node <- AllNodes, Node =/= Leader],
+  rpc:call(Leader, simple_gossip_server, set_max_gossip_per_period, [2000]),
+  rpc:call(Leader, simple_gossip_server, set_gossip_interval, [500]),
+  wait_to_reconcile(Leader, 5000),
+  ok.

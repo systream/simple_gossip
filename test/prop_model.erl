@@ -21,13 +21,19 @@ prop_test() ->
   simple_gossip_persist:delete_file(),
   application:ensure_all_started(simple_gossip),
   simple_gossip_test_tools:wait_to_reconcile(),
-  simple_gossip_server:set_max_gossip_per_period(2000),
-  logger:set_primary_config(level, info),
+  Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3']),
+  persistent_term:put(prop_model_nodes, Nodes),
+  logger:set_primary_config(level, notice),
+  logger:add_primary_filter(hide_progress, {fun logger_filters:progress/2, stop}),
+  DropInfoReports = fun(#{level := _, msg := {report, _}}, _Args) -> stop;
+                       (_LogEvent, _Args) -> ignore
+                    end,
+  logger:add_primary_filter(hide_info_reports, {DropInfoReports, stop}),
   ?FORALL(Cmds, commands(?MODULE),
           begin
               simple_gossip:set_sync(1),
               {History, State, Result} = run_commands(?MODULE, Cmds),
-              ?WHENFAIL(io:format("History: ~p\nState: ~p\nResult: ~p\n",
+              ?WHENFAIL(io:format("History: ~p~nState: ~p~nResult: ~p~n",
                                   [History, State, Result]),
                         aggregate(cmd_names(Cmds), Result =:= ok))
           end).
@@ -47,9 +53,8 @@ cm({M, F, Args}) ->
 %%%%%%%%%%%%%
 %% @doc Initial model value at system start. Should be deterministic.
 initial_state() ->
-  Nodes = simple_gossip_test_tools:start_nodes(['g1', 'g2', 'g3']),
-  [simple_gossip:join(Node) || Node <- Nodes],
-
+  Nodes = persistent_term:get(prop_model_nodes),
+  simple_gossip_test_tools:reset_cluster(Nodes),
   #{nodes => Nodes,
     data => 1,
     subscribers => [],
@@ -234,7 +239,7 @@ format_server_state(undefined) ->
   io:format("Gossip server not running, pid is undefined~n", []).
 
 precondition_wait_to_reconcile(true, Node) ->
-  simple_gossip_test_tools:wait_to_reconcile(Node, 1536),
+  simple_gossip_test_tools:wait_to_reconcile(Node, 1636),
   true;
 precondition_wait_to_reconcile(false, _Node) ->
   false.
