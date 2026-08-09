@@ -33,8 +33,8 @@ prop_test() ->
           begin
               simple_gossip:set_sync(1),
               {History, State, Result} = run_commands(?MODULE, Cmds),
-              ?WHENFAIL(io:format("History: ~p~nState: ~p~nResult: ~p~n",
-                                  [History, State, Result]),
+              ?WHENFAIL(io:format("Cmds: ~p~nHistory: ~p~nState: ~p~nResult: ~p~n",
+                                  [Cmds, History, State, Result]),
                         aggregate(cmd_names(Cmds), Result =:= ok))
           end).
 
@@ -98,6 +98,12 @@ precondition(_, {call, rpc, call, [_Node, _, unsubscribe, [skip]]}) ->
   false;
 precondition(_, {call, erlang, exit, [skip, kill]}) ->
   false;
+
+precondition(_, {call, rpc, call, [Node, _, set, [_Data]]}) ->
+  case simple_gossip_test_tools:wait_to_reconcile(Node, 5000) of
+    ok -> true;
+    _ -> io:format("Precondition SET failed timeout Node: ~p~n", [Node]), false
+  end;
 
 precondition(_State, {call, _Mod, _Fun, _Args}) ->
   true.

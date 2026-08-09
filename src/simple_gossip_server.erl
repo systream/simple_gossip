@@ -329,7 +329,9 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   when Node == node() ->
   ?LOG_INFO("Node ~p leaving. Leader: ~p", [Node, Node]),
   OthersRumor = simple_gossip_rumor:remove_node(Rumor, Node),
-  gossip(OthersRumor, gossip_neighbours(simple_gossip_rumor:leader(OthersRumor), OthersRumor)),
+
+  gossip(OthersRumor, gossip_neighbours(Node, Rumor)),
+  gossip(OthersRumor, simple_gossip_rumor:leader(OthersRumor)),
   MyRumor = simple_gossip_rumor:new(Rumor),
   simple_gossip_event:notify(MyRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = MyRumor})};
@@ -339,7 +341,7 @@ handle_command({leave, Node}, _From, #state{rumor = #rumor{leader = Node} = Rumo
   when Node =/= node() ->
   ?LOG_INFO("Node ~p leaving. Leader: ~p~n", [Node, Node]),
   NewRumor = simple_gossip_rumor:remove_node(Rumor, Node),
-  gossip(NewRumor),
+  gossip(NewRumor, gossip_neighbours(simple_gossip_rumor:leader(Rumor), Rumor)),
   simple_gossip_event:notify(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
@@ -353,6 +355,8 @@ handle_command({leave, Node}, _From,
                                          simple_gossip_event:notify(NewRumor),
                                          NewRumor
                                 end),
+  % Gossip departure to old neighbours
+  gossip(NewRumor, gossip_neighbours(simple_gossip_rumor:leader(Rumor), Rumor)),
   gossip(NewRumor),
   {reply, ok, reschedule_gossip(State#state{rumor = NewRumor})};
 
